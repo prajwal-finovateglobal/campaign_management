@@ -1,0 +1,59 @@
+{
+  "sample_requests": {
+    "example_1_all_filters": {
+      "start_time": "2025-12-08 11:13:29",
+      "end_time": "2025-12-08 11:15:29",
+      "con_status": true,
+      "direction": "inbound",
+      "language": "en",
+      "duration": 300.0
+    },
+    "example_2_time_range_only": {
+      "start_time": "2025-12-08 10:00:00",
+      "end_time": "2025-12-08 12:00:00"
+    },
+    "example_3_connected_status": {
+      "con_status": true
+    },
+    "example_4_direction_filter": {
+      "direction": "outbound"
+    },
+    "example_5_language_and_duration": {
+      "language": "en",
+      "duration": 180.0
+    },
+    "example_6_minimal": {},
+    "example_7_start_time_only": {
+      "start_time": "2025-12-08 11:00:00"
+    },
+    "example_8_end_time_only": {
+      "end_time": "2025-12-08 12:00:00"
+    },
+    "example_9_direction_options": {
+      "direction": "inbound"
+    },
+    "example_10_all_optional_null": {
+      "start_time": null,
+      "end_time": null,
+      "con_status": null,
+      "direction": null,
+      "language": null,
+      "duration": null
+    },
+    "example_11_specific_record_id_1": {
+      "start_time": "2025-12-05 17:47:00",
+      "end_time": "2025-12-05 17:48:00",
+      "con_status": true
+    }
+  },
+  "curl_examples": {
+    "example_1": "curl -X POST 'http://localhost:8000/show_data' -H 'Content-Type: application/json' -d '{\"start_time\": \"2025-12-08 11:13:29\", \"end_time\": \"2025-12-08 11:15:29\", \"con_status\": true}'",
+    "example_2": "curl -X POST 'http://localhost:8000/show_data' -H 'Content-Type: application/json' -d '{\"direction\": \"inbound\", \"language\": \"en\"}'",
+    "example_specific_record": "curl -X POST 'http://localhost:8000/show_data' -H 'Content-Type: application/json' -d '{\"start_time\": \"2025-12-05 17:47:00\", \"end_time\": \"2025-12-05 17:48:00\", \"con_status\": true}'"
+  },
+  "python_examples": {
+    "example_1": "import requests\n\nurl = 'http://localhost:8000/show_data'\ndata = {\n    'start_time': '2025-12-08 11:13:29',\n    'end_time': '2025-12-08 11:15:29',\n    'con_status': True,\n    'direction': 'inbound',\n    'language': 'en',\n    'duration': 300.0\n}\nresponse = requests.post(url, json=data)\nprint(response.json())",
+    "example_2": "from schema.tables import ShowDataRequest\n\nrequest = ShowDataRequest(\n    start_time='2025-12-08 11:13:29',\n    end_time='2025-12-08 11:15:29',\n    con_status=True,\n    direction='inbound',\n    language='en',\n    duration=300.0\n)",
+    "example_specific_record": "import requests\n\nurl = 'http://localhost:8000/show_data'\ndata = {\n    'start_time': '2025-12-05 17:47:00',\n    'end_time': '2025-12-05 17:48:00',\n    'con_status': True\n}\nresponse = requests.post(url, json=data)\nprint(response.json())"
+  }
+}
