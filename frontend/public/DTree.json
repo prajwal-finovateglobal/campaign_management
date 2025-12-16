@@ -1,0 +1,399 @@
+{
+    "disposition_tree": [{
+        "disposotion_code": "CALL_CONNECTED",
+        "dpath": "A",
+        "description": "The call was successfully connected and a human answered, but the borrower did not explicitly confirm their identity. The conversation did not progress beyond initial contact, and no loan-related discussion, verification, or payment conversation took place.",
+        "children": [
+            
+            {
+                "disposotion_code": "NOT_RPC",
+                "dpath": "AA",
+                "description": "The call did not successfully reach or engage the intended borrower. The person who answered was not the right party, or the call could not proceed into a meaningful conversation due to silence, non-response, immediate unavailability, or network drop. No loan discussion, verification, or payment-related conversation occurred.",
+                "classification_rules": {
+                    "include_if": [
+                    "Call answered by a wrong person or third party",
+                    "Borrower did not speak or remained silent",
+                    "Call dropped due to network issues before engagement",
+                    "Borrower was busy and requested to end the call immediately",
+                    "No loan-related discussion took place"
+                    ],
+                    "exclude_if": [
+                    "Borrower confirmed identity",
+                    "Borrower discussed loan details or payment",
+                    "Borrower requested a callback after engaging in conversation"
+                    ]
+                },
+                "children": [
+                    {
+                        "disposotion_code": "WRONG_PARTY_CONTACT",
+                        "dpath": "AAA",
+                        "description": "The call was answered by someone who is not the borrower and has no responsibility or involvement with the loan. The borrower was not contacted and no loan discussion occurred.",
+                        "final": true 
+                    },
+                    {
+                        "disposotion_code": "THIRD_PARTY_CONTACT",
+                        "dpath": "AAB",
+                        "description": "The call was answered by a family member, friend, neighbor, or colleague of the borrower. The borrower was not directly contacted and no loan or payment discussion occurred with the borrower.",
+                        "final": true 
+                    },
+                    {
+                        "disposotion_code": "NO_RESPONSE_OR_SILENCE",
+                        "dpath": "AAC",
+                        "description": "The call connected but the borrower did not respond or remained silent, preventing any identity verification or loan discussion.",
+                        "final": true 
+                    },
+                    {
+                        "disposotion_code": "CALL_DROPPED_OR_NETWORK_ISSUE",
+                        "dpath": "AAD",
+                        "description": "The call was interrupted due to network issues or disconnection before the borrower could be engaged or any loan-related conversation could occur.",
+                        "final": true 
+                    }
+                ]
+            },
+
+            {
+                "disposotion_code": "RPC",
+                "dpath": "AB",
+                "description": "The call successfully reached the intended borrower, and the borrower acknowledged the call, confirming that they are the right party. Meaningful interaction with the borrower is possible.",
+                "classification_rules": {
+                    "include_if": [
+                        "The borrower confirms they are the intended person",
+                        "The borrower responds clearly and engages in conversation",
+                        "The borrower continues the call beyond greetings or acknowledgements"
+                    ],
+                    "exclude_if": [
+                        "The call is answered by a wrong or third party",
+                        "The borrower does not respond or remains silent",
+                        "The call drops before identity acknowledgement",
+                        "No confirmation or engagement from the borrower occurs"
+                    ]
+                },
+                "children": [
+                    {
+                        "disposotion_code": "BUSY_OR_CALLBACK_REQUESTED",
+                        "dpath": "ABA",
+                        "description": "The borrower could not engage in the call due to being busy or unavailable and requested to end the call or be contacted later. No loan discussion or verification occurred.",
+                        "classification_rules": {
+                            "include_if": [
+                            "Borrower says they are busy or unavailable",
+                            "Borrower asks to call back later before any loan discussion"
+                            ],
+                            "exclude_if": [
+                            "Borrower discusses the loan or payment before requesting callback",
+                            "Borrower asks for callback after engaging in loan discussion"
+                            ]
+                        },
+                        "final": true 
+                    },
+                    {
+                        "disposotion_code": "CALL_DROPPED_AFTER_RPC",
+                        "dpath": "ABB",
+                        "description": "The call was disconnected due to network or technical issues after the borrower was confirmed as the right party, but before any loan or payment discussion could occur.",
+                        "final": true
+                    },
+                    {
+                        "disposotion_code": "SILENT_AFTER_RPC",
+                        "dpath": "ABC",
+                        "description": "The borrower confirmed they are the right party but did not respond or engage further, remaining silent and preventing any loan or payment discussion.",
+                        "final": true
+                    },
+
+                    {
+                        "disposotion_code": "LOAN_INFORMATION_INCORRECT",
+                        "dpath": "ABD",
+                        "description": "The borrower was successfully contacted, but the borrower does not fully accept the loan information presented. The borrower either denies ownership of the loan, reports incorrect loan details, or requests verification before proceeding. No payment commitment or resolution is achieved at this stage.",
+                        "classification_rules": {
+                            "include_if": [
+                            "Borrower states that the loan does not belong to them",
+                            "Borrower says the loan amount, village, name, or repayment details are incorrect",
+                            "Borrower asks for verification or proof before discussing payment",
+                            "Borrower expresses doubt or confusion about the loan details"
+                            ],
+                            "exclude_if": [
+                            "Borrower confirms the loan belongs to them",
+                            "Borrower accepts loan details as correct",
+                            "Borrower discusses payment, repayment, or settlement options",
+                            "Borrower gives any payment commitment or promise"
+                            ]
+                        },
+                        "children": [
+                            {
+                                "disposotion_code": "LOAN_DISPUTE_NOT_MY_LOAN",
+                                "dpath": "ABDA",
+                                "description": "The borrower explicitly states that the loan does not belong to them and denies ownership or responsibility for the loan.",
+                                "final": true },
+                            {
+                                "disposotion_code": "DETAILS_MISMATCH",
+                                "dpath": "ABDB",
+                                "description": "The borrower acknowledges the loan but states that specific details such as amount, dates, village, or repayment history do not match their understanding.",
+                                "final": true },
+                            {
+                                "disposotion_code": "VERIFICATION_REQUIRED",
+                                "dpath": "ABDC",
+                                "description": "The borrower is unsure about the loan details and requests verification or confirmation before accepting responsibility or proceeding further.",
+                                "final": true }
+                        ]
+                    },
+
+                    {
+                        "disposotion_code": "LOAN_INFO_CONFIRMED",
+                        "dpath": "ABE",
+                        "description": "The borrower acknowledges that the loan belongs to them and confirms or accepts the loan-related details presented during the call. The borrower does not dispute ownership of the loan and is willing to proceed with discussion related to payment, callback, or resolution.",
+                        "classification_rules": {
+                            "include_if": [
+                                "Borrower agrees that the loan is theirs",
+                                "Borrower confirms or accepts loan-related details such as loan existence or responsibility",
+                                "Borrower does not deny or dispute the loan when informed",
+                                "Conversation proceeds toward payment discussion, callback, or resolution after loan confirmation"
+                            ],
+                            "exclude_if": [
+                                "Borrower explicitly says the loan is not theirs",
+                                "Borrower disputes ownership of the loan",
+                                "Borrower says loan details do not match and refuses acceptance",
+                                "Call ends before any loan acknowledgement is made"
+                            ]
+                        },
+                        "children": [
+                            {
+                                "disposotion_code": "PAYMENT_OUTCOME",
+                                "dpath": "ABEA",
+                                "description": "This node represents the borrower's payment-related response after the loan information has been confirmed. It captures whether the borrower has already paid, commits to making a payment, or states an inability to pay. All outcomes under this node are mutually exclusive and represent the final payment intent expressed during the call.",
+                                "classification_rules": {
+                                    "include_if": [
+                                        "Borrower responds with any payment-related statement after loan confirmation"
+                                    ],
+                                    "exclude_if": [
+                                        "Borrower disputes loan ownership",
+                                        "Borrower requests callback without discussing payment",
+                                        "Call ends due to silence or network issues after RPC"
+                                    ]
+                                },
+                                "final": false,
+                                "children": [
+                                    {
+                                        "disposotion_code": "ALREADY_PAID",
+                                        "dpath": "ABEAA",
+                                        "description": "The borrower states that the loan payment has already been made before this call.",
+                                        "final": true 
+                                    },
+
+                                    {
+                                        "disposotion_code": "WILL_PAY_FULL",
+                                        "dpath": "ABEAB",
+                                        "description": "The borrower commits to paying the full EMI or full due amount, either immediately or at a specified later time.",
+                                        "classification_rules": {
+                                            "include_if": [
+                                            "Borrower agrees to pay the complete EMI or full outstanding amount",
+                                            "Borrower does not request partial or token payment"
+                                            ],
+                                            "exclude_if": [
+                                            "Borrower agrees only to partial or token payment",
+                                            "Borrower is unable or unwilling to commit to full payment"
+                                            ]
+                                        },
+                                        "children": [
+                                            {
+                                                "disposotion_code": "TODAY",
+                                                "dpath": "ABEABA",
+                                                "description": "The borrower commits to paying the full amount on the same day as the call.",
+                                                "final": true 
+                                            },
+                                            {
+                                                "disposotion_code": "WILL_PAY_LATER",
+                                                "dpath": "ABEABB",
+                                                "description": "The borrower commits to paying the full amount at a future time, not on the same day as the call.",
+                                                "children": [
+                                                    {
+                                                        "disposotion_code": "DATE_GIVEN_PTP",
+                                                        "dpath": "ABEABBA",
+                                                        "description": "The borrower provides a specific future date on which they promise to make the full payment.",
+                                                        "final": true 
+                                                    },
+                                                    {
+                                                        "disposotion_code": "NO_DATE_SOFT_PROMISE",
+                                                        "dpath": "ABEABBB",
+                                                        "description": "The borrower agrees to pay the full amount later but does not provide a specific payment date.",
+                                                        "final": true 
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+
+                                    {
+                                        "disposotion_code": "WILL_PAY_TOKEN",
+                                        "dpath": "ABEAC",
+                                        "description": "The borrower agrees to make a partial or token payment instead of the full EMI amount. This indicates willingness to pay, but not the complete installment.",
+                                        "classification_rules": {
+                                            "include_if": [
+                                                "Borrower agrees to pay a smaller or partial amount",
+                                                "Borrower mentions paying some amount or token payment"
+                                            ],
+                                            "exclude_if": [
+                                                "Borrower agrees to pay the full EMI",
+                                                "Borrower says payment is already done",
+                                                "Borrower states inability to pay any amount"
+                                            ]
+                                        },
+                                        "children": [
+                                            {
+                                                "disposotion_code": "TODAY",
+                                                "dpath": "ABEACA",
+                                                    "description": "The borrower commits to making a token (partial) payment on the same day as the call.",
+                                                    "final": true 
+                                                },
+                                            {
+                                                "disposotion_code": "WILL_PAY_LATER",
+                                                "dpath": "ABEACB",
+                                                "description": "The borrower agrees to make a token payment at a later time, not on the same day as the call.",
+                                                "children": [
+                                                    {
+                                                        "disposotion_code": "DATE_GIVEN_PTP",
+                                                        "dpath": "ABEACBA",
+                                                        "description": "The borrower commits to making a token payment on a specific future date that is clearly mentioned during the call.",
+                                                        "final": true 
+                                                    },
+                                                    {
+                                                        "disposotion_code": "NO_DATE_SOFT_PROMISE",
+                                                        "dpath": "ABEACBB",
+                                                        "description": "The borrower expresses intent to make a token payment in the future but does not provide any specific date.",
+                                                        "final": true 
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+
+                                    {
+                                        "disposotion_code": "CANNOT_PAY",
+                                        "dpath": "ABEAD",
+                                        "description": "The borrower explicitly stated that they are unable or unwilling to make any payment at this time. No payment commitment was made during the call.",
+                                        "classification_rules": {
+                                            "include_if": [
+                                            "Borrower says they cannot pay any amount",
+                                            "Borrower says payment is not possible currently",
+                                            "Borrower refuses to make a payment"
+                                            ],
+                                            "exclude_if": [
+                                            "Borrower agrees to pay later",
+                                            "Borrower agrees to pay a token amount",
+                                            "Borrower requests time but indicates intent to pay"
+                                            ]
+                                        },
+                                        "children": [
+                                            {
+                                                "disposotion_code": "TEMPORARY_FINANCIAL_STRESS",
+                                                "dpath": "ABEADA",
+                                                "description": "The borrower is currently unable to pay due to temporary financial difficulties.",
+                                                "children": [
+                                                    {
+                                                        "disposotion_code": "JOB_LOSS",
+                                                        "dpath": "ABEADAA",
+                                                        "description": "The borrower stated they cannot pay due to loss of employment or income.",
+                                                        "final": true 
+                                                    },
+                                                    {
+                                                        "disposotion_code": "SALARY_DELAY",
+                                                        "dpath": "ABEADAB",
+                                                        "description": "The borrower stated they cannot pay because their salary or income has been delayed.",
+                                                        "final": true 
+                                                    },
+                                                    {
+                                                        "disposotion_code": "CROP_FAILURE",
+                                                        "dpath": "ABEADAC",
+                                                        "description": "The borrower stated they cannot pay due to crop loss or agricultural failure.",
+                                                        "final": true 
+                                                    },
+                                                    {
+                                                        "disposotion_code": "FESTIVAL_OR_SEASONAL_PRESSURE",
+                                                        "dpath": "ABEADAD",
+                                                        "description": "The borrower stated they cannot pay due to festival expenses or seasonal financial pressure.",
+                                                        "final": true 
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "disposotion_code": "MEDICAL_EMERGENCY",
+                                                "dpath": "ABEADB",
+                                                "description": "The borrower stated that they are unable to make any payment due to a medical emergency affecting themselves or an immediate family member, such as illness, hospitalization, or urgent medical expenses. No payment commitment was possible during this call.",
+                                                "final": true 
+                                            },
+                                            {
+                                                "disposotion_code": "PERMANENT_INABILITY",
+                                                "dpath": "ABEADC",
+                                                "description": "The borrower clearly states that they are permanently unable to make any payment due to long-term circumstances such as ongoing loss of income, closure of livelihood, chronic dependency, or absence of any foreseeable repayment capacity.",
+                                                "final": true 
+                                            },
+                                            {
+                                                "disposotion_code": "FLAT_REFUSAL_OR_UNWILLING",
+                                                "dpath": "ABEADD",
+                                                "description": "The borrower explicitly refuses to make any payment and shows no willingness to commit to payment now or later, without citing a temporary financial, medical, or situational reason.",
+                                                "final": true 
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+
+                            {
+                                "disposotion_code": "CALLBACK_OR_DEFERRAL",
+                                "dpath": "ABEB",
+                                "description": "The borrower confirmed loan ownership and engaged in the conversation but did not proceed with payment discussion. The borrower explicitly requested to continue the discussion at a later time or deferred the conversation without providing any payment commitment.",
+                                "classification_rules": {
+                                    "include_if": [
+                                    "Borrower confirms the loan is theirs",
+                                    "Borrower listens to the context of the call",
+                                    "Borrower requests a callback or postpones the discussion",
+                                    "No payment amount, date, or payment mode is agreed"
+                                    ],
+                                    "exclude_if": [
+                                    "Borrower commits to pay any amount (full, token, or later)",
+                                    "Borrower claims payment is already done",
+                                    "Borrower denies loan ownership",
+                                    "Call ends due to network issues or silence after RPC"
+                                    ]
+                                },
+                                "final": true 
+                            
+                            },
+
+                            {
+                                "disposotion_code": "ESCALATION_OR_OVERRIDE",
+                                "dpath": "ABEC",
+                                "description": "The call could not be resolved within the automated flow and requires intervention by a human or senior team due to complexity, sensitivity, or policy requirements.",
+                                "children": [
+                                    {
+                                        "disposotion_code": "ESCALATED_TO_HUMAN_AGENT",
+                                        "dpath": "ABECA",
+                                        "description": "The case was transferred to a human agent or senior team for manual handling because the situation could not be appropriately addressed by the automated system.",
+                                        "final": true 
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {   
+                "disposotion_code": "RPC_NOT_ESTABLISHED",
+                "dpath": "AC",
+                "description": "The call was successfully connected and a human answered, but the borrower did not explicitly confirm their identity. The conversation did not progress beyond initial contact, and no loan-related discussion, verification, or payment conversation took place.",
+                "children": [
+                    {
+                        "disposotion_code": "CALL_DROPPED_EARLY",
+                        "dpath": "ACA",
+                        "description": "The call was connected and answered, but it was disconnected immediately after initial contact. The borrower did not confirm their identity, and the conversation ended before any loan, verification, or payment-related discussion could occur.",
+                        "final": true
+                    },
+                    {
+                        "disposotion_code": "SILENT_AFTER_CALL_CONNECTED",
+                        "dpath": "ACB",
+                        "description": "The call was connected and answered, but the borrower remained silent or did not meaningfully respond after the initial connection. The borrower did not confirm their identity, and no loan, verification, or payment-related discussion occurred.",
+                        "final": true
+                    }
+                ]
+            }
+        ]
+    }
+    ]
+}

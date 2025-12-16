@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import DatePicker from 'react-datepicker';
 import { format } from 'date-fns';
+import { api } from '@/lib/api';
 import { 
   Calendar, 
   Filter, 
@@ -58,7 +59,7 @@ export function FilterSection({
     const fetchCampaigns = async () => {
       setLoadingCampaigns(true);
       try {
-        const response = await fetch(`http://localhost:8000/campaign/simple?phase_id=${selectedPhaseId}`);
+        const response = await api.get(`/campaign/simple?phase_id=${selectedPhaseId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch campaigns');
         }

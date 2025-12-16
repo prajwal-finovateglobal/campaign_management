@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface Client {
   id: number;
@@ -55,7 +56,7 @@ export function PersistentFilters({
     const fetchClients = async () => {
       setLoadingClients(true);
       try {
-        const response = await fetch('http://localhost:8000/client');
+        const response = await api.get('/client');
         if (!response.ok) {
           throw new Error('Failed to fetch clients');
         }
@@ -83,7 +84,7 @@ export function PersistentFilters({
     const fetchPhases = async () => {
       setLoadingPhases(true);
       try {
-        const response = await fetch(`http://localhost:8000/phase?client_id=${clientId}`);
+        const response = await api.get(`/phase?client_id=${clientId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch phases');
         }
@@ -111,7 +112,7 @@ export function PersistentFilters({
     const fetchCampaigns = async () => {
       setLoadingCampaigns(true);
       try {
-        const response = await fetch(`http://localhost:8000/campaign?phase_id=${phaseId}`);
+        const response = await api.get(`/campaign?phase_id=${phaseId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch campaigns');
         }

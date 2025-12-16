@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle } from 'lucide-react';
 import { DataTable } from './DataTable';
+import { api } from '@/lib/api';
 
 interface CSVData {
   [key: string]: any;
@@ -121,6 +122,13 @@ export function CampaignManagement() {
   const [settingPhone, setSettingPhone] = useState<string | null>(null);
   const [startingCampaign, setStartingCampaign] = useState<number | null>(null);
   
+  // Campaign start/stop confirmation modal
+  const [campaignActionModal, setCampaignActionModal] = useState<{
+    show: boolean;
+    action: 'start' | 'stop' | null;
+    campaign: Campaign | null;
+  }>({ show: false, action: null, campaign: null });
+  
   // Upload metadata states
   const [uploadMetadataEnabled, setUploadMetadataEnabled] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -134,12 +142,7 @@ export function CampaignManagement() {
     const fetchClients = async () => {
       setLoadingClients(true);
       try {
-        const response = await fetch('http://localhost:8000/client', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
+        const response = await api.get('/client');
 
         if (response.ok) {
           const result = await response.json();
@@ -165,12 +168,7 @@ export function CampaignManagement() {
       const fetchPhases = async () => {
         setLoadingPhases(true);
         try {
-          const response = await fetch(`http://localhost:8000/phase?client_id=${selectedClientId}`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          });
+          const response = await api.get(`/phase?client_id=${selectedClientId}`);
 
           if (response.ok) {
             const result = await response.json();
@@ -207,10 +205,7 @@ export function CampaignManagement() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/upload_csv', {
-        method: 'POST',
-        body: formData,
-      });
+      const response = await api.upload('/upload_csv', formData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -241,12 +236,7 @@ export function CampaignManagement() {
   const handleShowCurrentCD = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/get_csv_data', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get('/get_csv_data');
 
       if (!response.ok) {
         throw new Error('Failed to fetch CSV data');
@@ -284,14 +274,8 @@ export function CampaignManagement() {
     setCreatingPhase(true);
     setPhaseMessage(null);
     try {
-      const response = await fetch('http://localhost:8000/phase/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          client_id: selectedClientId,
-        }),
+      const response = await api.post('/phase/create', {
+        client_id: selectedClientId,
       });
 
       if (!response.ok) {
@@ -303,12 +287,7 @@ export function CampaignManagement() {
       setPhaseMessage(`Phase created: ${result.name} (ID: ${result.id})`);
       
       // Refresh phases list
-      const phasesResponse = await fetch(`http://localhost:8000/phase?client_id=${selectedClientId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const phasesResponse = await api.get(`/phase?client_id=${selectedClientId}`);
 
       if (phasesResponse.ok) {
         const phasesResult = await phasesResponse.json();
@@ -334,12 +313,7 @@ export function CampaignManagement() {
 
     setLoadingCampaigns(true);
     try {
-      const response = await fetch(`http://localhost:8000/campaign?phase_id=${selectedPhaseId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get(`/campaign?phase_id=${selectedPhaseId}`);
 
       if (response.ok) {
         const result = await response.json();
@@ -373,12 +347,7 @@ export function CampaignManagement() {
       const loadCampaigns = async () => {
         setLoadingCampaigns(true);
         try {
-          const response = await fetch(`http://localhost:8000/campaign?phase_id=${selectedPhaseId}`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          });
+          const response = await api.get(`/campaign?phase_id=${selectedPhaseId}`);
 
           if (response.ok) {
             const result = await response.json();
@@ -405,12 +374,7 @@ export function CampaignManagement() {
   const fetchCampaignIds = async () => {
     setLoadingCampaignIds(true);
     try {
-      const response = await fetch('http://localhost:8000/get_campaign_ids', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get('/get_campaign_ids');
 
       if (response.ok) {
         const result = await response.json();
@@ -429,12 +393,7 @@ export function CampaignManagement() {
     
     setLoadingCampaigns(true);
     try {
-      const response = await fetch(`http://localhost:8000/campaign?phase_id=${selectedPhaseId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get(`/campaign?phase_id=${selectedPhaseId}`);
 
       if (response.ok) {
         const result = await response.json();
@@ -460,12 +419,7 @@ export function CampaignManagement() {
 
     try {
       // Fetch phones
-      const phonesResponse = await fetch('http://localhost:8000/phones', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const phonesResponse = await api.get('/phones');
 
       if (phonesResponse.ok) {
         const phonesResult = await phonesResponse.json();
@@ -475,12 +429,7 @@ export function CampaignManagement() {
         const agentPromises = (phonesResult.phones || []).map(async (phone: Phone) => {
           if (phone.agent_id) {
             try {
-              const agentResponse = await fetch(`http://localhost:8000/agent/${phone.agent_id}`, {
-                method: 'GET',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-              });
+              const agentResponse = await api.get(`/agent/${phone.agent_id}`);
               if (agentResponse.ok) {
                 const agentResult = await agentResponse.json();
                 return { agentId: phone.agent_id, agent: agentResult.agent };
@@ -515,15 +464,9 @@ export function CampaignManagement() {
   const handleSetPhone = async (campaignId: number, phoneId: string) => {
     setSettingPhone(phoneId);
     try {
-      const response = await fetch('http://localhost:8000/campaign/set_caller', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          campaign_id: campaignId,
-          phone_id: phoneId,
-        }),
+      const response = await api.post('/campaign/set_caller', {
+        campaign_id: campaignId,
+        phone_id: phoneId,
       });
 
       if (!response.ok) {
@@ -549,36 +492,87 @@ export function CampaignManagement() {
     }
   };
 
+  // Function to open start campaign confirmation modal
+  const handleOpenStartModal = (campaignId: number) => {
+    const campaign = campaigns.find(c => c.id === campaignId);
+    if (campaign) {
+      setCampaignActionModal({ show: true, action: 'start', campaign });
+    }
+  };
+
+  // Function to open stop campaign confirmation modal
+  const handleOpenStopModal = (campaignId: number) => {
+    const campaign = campaigns.find(c => c.id === campaignId);
+    if (campaign) {
+      setCampaignActionModal({ show: true, action: 'stop', campaign });
+    }
+  };
+
   // Function to start campaign
   const handleStartCampaign = async (campaignId: number) => {
+    console.log(`[FRONTEND] Start Campaign button clicked for campaign ID: ${campaignId}`);
+    
+    // Find campaign details for logging
+    const campaign = campaigns.find(c => c.id === campaignId);
+    if (campaign) {
+      console.log(`[FRONTEND] Campaign details:`, {
+        id: campaign.id,
+        name: campaign.campaign_name,
+        cid: campaign.cid,
+        phone_id: campaign.phone_id,
+        agent_id: campaign.agent_id,
+        status: campaign.status
+      });
+      
+      // Warn if caller is not set
+      if (!campaign.phone_id && !campaign.agent_id) {
+        console.warn(`[FRONTEND] WARNING: Campaign ${campaignId} does not have a caller set (phone_id: ${campaign.phone_id}, agent_id: ${campaign.agent_id})`);
+      }
+    }
+    
     setStartingCampaign(campaignId);
     try {
-      const response = await fetch('http://localhost:8000/campaign/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          campaign_id: campaignId,
-        }),
-      });
+      const requestBody = {
+        campaign_id: campaignId,
+      };
+      
+      console.log(`[FRONTEND] Making POST request to /campaign/start`);
+      console.log(`[FRONTEND] Request body:`, requestBody);
+      console.log(`[FRONTEND] Request URL: http://localhost:8000/campaign/start`);
+      
+      const response = await api.post('/campaign/start', requestBody);
+
+      console.log(`[FRONTEND] Response received - Status: ${response.status}, OK: ${response.ok}`);
 
       if (!response.ok) {
         const errorData = await response.json();
         const errorMessage = errorData.detail?.message || errorData.detail?.error || 'Failed to start campaign';
+        console.error(`[FRONTEND] ERROR: Campaign start failed:`, errorData);
+        console.error(`[FRONTEND] Error message: ${errorMessage}`);
         alert(errorMessage);
       } else {
         const result = await response.json();
+        console.log(`[FRONTEND] SUCCESS: Campaign started successfully:`, result);
         alert(result.message || 'Campaign started successfully');
         
         // Refresh campaigns to get updated status
+        console.log(`[FRONTEND] Refreshing campaigns list to get updated status`);
         await refreshCampaigns();
+        
+        // Close modal
+        setCampaignActionModal({ show: false, action: null, campaign: null });
       }
     } catch (error: any) {
-      console.error('Error starting campaign:', error);
+      console.error(`[FRONTEND] EXCEPTION: Error starting campaign:`, error);
+      console.error(`[FRONTEND] Exception details:`, {
+        message: error.message,
+        stack: error.stack,
+        campaignId: campaignId
+      });
       alert(`Error: ${error.message || 'Failed to start campaign'}`);
     } finally {
       setStartingCampaign(null);
+      console.log(`[FRONTEND] Start campaign operation completed for campaign ID: ${campaignId}`);
     }
   };
 
@@ -586,14 +580,8 @@ export function CampaignManagement() {
   const handleStopCampaign = async (campaignId: number) => {
     setStartingCampaign(campaignId);
     try {
-      const response = await fetch('http://localhost:8000/campaign/stop', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          campaign_id: campaignId,
-        }),
+      const response = await api.post('/campaign/stop', {
+        campaign_id: campaignId,
       });
 
       if (!response.ok) {
@@ -606,6 +594,9 @@ export function CampaignManagement() {
         
         // Refresh campaigns to get updated status
         await refreshCampaigns();
+        
+        // Close modal
+        setCampaignActionModal({ show: false, action: null, campaign: null });
       }
     } catch (error: any) {
       console.error('Error stopping campaign:', error);
@@ -621,12 +612,7 @@ export function CampaignManagement() {
     try {
       // Refresh all campaign statuses from Millis.ai
       if (selectedPhaseId) {
-        const statusResponse = await fetch(`http://localhost:8000/campaign/refresh-all-status?phase_id=${selectedPhaseId}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
+        const statusResponse = await api.post(`/campaign/refresh-all-status?phase_id=${selectedPhaseId}`);
 
         if (statusResponse.ok) {
           const statusResult = await statusResponse.json();
@@ -1010,12 +996,7 @@ export function CampaignManagement() {
                                   onClick={async () => {
                                     setRefreshingStatus(campaign.id);
                                     try {
-                                      const response = await fetch(`http://localhost:8000/campaign/${campaign.id}/refresh-status`, {
-                                        method: 'POST',
-                                        headers: {
-                                          'Content-Type': 'application/json',
-                                        },
-                                      });
+                                      const response = await api.post(`/campaign/${campaign.id}/refresh-status`);
 
                                       if (!response.ok) {
                                         const errorData = await response.json();
@@ -1080,7 +1061,7 @@ export function CampaignManagement() {
                                 )
                               ) : campaign.status === 'started' ? (
                                 <button
-                                  onClick={() => handleStopCampaign(campaign.id)}
+                                  onClick={() => handleOpenStopModal(campaign.id)}
                                   disabled={startingCampaign === campaign.id}
                                   className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
@@ -1093,7 +1074,7 @@ export function CampaignManagement() {
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
                               {campaign.status === 'idle' && campaign.phone_id ? (
                                 <button
-                                  onClick={() => handleStartCampaign(campaign.id)}
+                                  onClick={() => handleOpenStartModal(campaign.id)}
                                   disabled={startingCampaign === campaign.id}
                                   className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
@@ -1115,14 +1096,8 @@ export function CampaignManagement() {
                                   onClick={async () => {
                                     setSettingCid(campaign.id);
                                     try {
-                                      const response = await fetch('http://localhost:8000/set_campaign_id', {
-                                        method: 'POST',
-                                        headers: {
-                                          'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({
-                                          campaign_id: campaign.id,
-                                        }),
+                                      const response = await api.post('/set_campaign_id', {
+                                        campaign_id: campaign.id,
                                       });
 
                                       if (!response.ok) {
@@ -1133,7 +1108,7 @@ export function CampaignManagement() {
                                         const result = await response.json();
                                         alert(result.message || 'Campaign ID set successfully');
                                         // Refresh campaign IDs
-                                        const idsResponse = await fetch('http://localhost:8000/get_campaign_ids');
+                                        const idsResponse = await api.get('/get_campaign_ids');
                                         if (idsResponse.ok) {
                                           const idsResult = await idsResponse.json();
                                           setCsvCampaignIds(idsResult.campaign_ids || []);
@@ -1239,15 +1214,9 @@ export function CampaignManagement() {
                             setCampaignIdMessage(null);
                             
                             try {
-                              const response = await fetch('http://localhost:8000/campaign/create', {
-                                method: 'POST',
-                                headers: {
-                                  'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({
-                                  phase_id: selectedPhaseId,
-                                  phase_name: selectedPhase.name,
-                                }),
+                              const response = await api.post('/campaign/create', {
+                                phase_id: selectedPhaseId,
+                                phase_name: selectedPhase.name,
                               });
 
                               if (!response.ok) {
@@ -1347,14 +1316,8 @@ export function CampaignManagement() {
                               setCampaignIdMessage(null);
                               
                               try {
-                                const response = await fetch('http://localhost:8000/set_campaign_id', {
-                                  method: 'POST',
-                                  headers: {
-                                    'Content-Type': 'application/json',
-                                  },
-                                  body: JSON.stringify({
-                                    campaign_id: createdCampaign.id,
-                                  }),
+                                const response = await api.post('/set_campaign_id', {
+                                  campaign_id: createdCampaign.id,
                                 });
 
                                 if (!response.ok) {
@@ -1459,12 +1422,7 @@ export function CampaignManagement() {
             setFormattingPhoneNumbers(true);
             setPhoneFormatMessage(null);
             try {
-              const response = await fetch('http://localhost:8000/format_phone_numbers', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-              });
+              const response = await api.post('/format_phone_numbers');
 
               if (!response.ok) {
                 const errorData = await response.json();
@@ -1728,12 +1686,7 @@ export function CampaignManagement() {
                   
                   setDeletingCampaign(true);
                   try {
-                    const response = await fetch(`http://localhost:8000/campaign/${deleteConfirmModal.campaignId}`, {
-                      method: 'DELETE',
-                      headers: {
-                        'Content-Type': 'application/json',
-                      },
-                    });
+                    const response = await api.delete(`/campaign/${deleteConfirmModal.campaignId}`);
 
                     if (!response.ok) {
                       const errorData = await response.json();
@@ -1816,14 +1769,8 @@ export function CampaignManagement() {
                   
                   setUploadingRecords(true);
                   try {
-                    const response = await fetch('http://localhost:8000/campaign/upload-records', {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        campaign_id: uploadRecordsModal.campaignId,
-                      }),
+                    const response = await api.post('/campaign/upload-records', {
+                      campaign_id: uploadRecordsModal.campaignId,
                     });
 
                     if (!response.ok) {
@@ -1984,6 +1931,133 @@ export function CampaignManagement() {
                 className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Campaign Start/Stop Confirmation Modal */}
+      {campaignActionModal.show && campaignActionModal.campaign && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-lg w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[var(--foreground)]">
+                {campaignActionModal.action === 'start' ? 'Start Campaign' : 'Stop Campaign'}
+              </h3>
+              <button
+                onClick={() => setCampaignActionModal({ show: false, action: null, campaign: null })}
+                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
+                disabled={startingCampaign === campaignActionModal.campaign?.id}
+              >
+                <X className="w-5 h-5 text-[var(--secondary)]" />
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-sm text-[var(--foreground)] mb-4">
+                Are you sure you want to {campaignActionModal.action === 'start' ? 'start' : 'stop'} this campaign?
+              </p>
+              
+              {/* Campaign Info */}
+              <div className="bg-[var(--input-bg)] border border-[var(--input-border)] rounded-md p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Campaign Name</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.campaign_name || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Campaign ID</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.id}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">CID (Millis.ai)</p>
+                    <p className="text-sm font-medium text-[var(--foreground)] break-all">
+                      {campaignActionModal.campaign.cid || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Status</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.status || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Caller Phone</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.phone_id || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Agent ID</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.agent_id || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Record Count</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.record_count !== null ? campaignActionModal.campaign.record_count : 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--secondary)] mb-1">Created At</p>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {campaignActionModal.campaign.created_at 
+                        ? new Date(campaignActionModal.campaign.created_at).toLocaleString() 
+                        : 'N/A'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {campaignActionModal.action === 'start' && !campaignActionModal.campaign.phone_id && !campaignActionModal.campaign.agent_id && (
+                <div className="mt-3 flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                  <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-yellow-600">
+                    Warning: This campaign does not have a caller set. The campaign may not be able to make calls.
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setCampaignActionModal({ show: false, action: null, campaign: null })}
+                disabled={startingCampaign === campaignActionModal.campaign?.id}
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!campaignActionModal.campaign?.id) return;
+                  
+                  if (campaignActionModal.action === 'start') {
+                    await handleStartCampaign(campaignActionModal.campaign.id);
+                  } else if (campaignActionModal.action === 'stop') {
+                    await handleStopCampaign(campaignActionModal.campaign.id);
+                  }
+                }}
+                disabled={startingCampaign === campaignActionModal.campaign?.id}
+                className={`px-4 py-2 text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
+                  campaignActionModal.action === 'start' 
+                    ? 'bg-green-600' 
+                    : 'bg-red-600'
+                }`}
+              >
+                {startingCampaign === campaignActionModal.campaign?.id ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {campaignActionModal.action === 'start' ? 'Starting...' : 'Stopping...'}
+                  </>
+                ) : (
+                  campaignActionModal.action === 'start' ? 'Start Campaign' : 'Stop Campaign'
+                )}
               </button>
             </div>
           </div>

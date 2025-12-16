@@ -8,11 +8,33 @@ venv/
 env/
 ENV/
 .venv
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
 # Environment variables
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+frontend/.env.local
+
+# Logs
+*.log
+logs/
+backend/logs/
+*.log.*
 
 # IDE
 .vscode/
@@ -20,29 +42,54 @@ ENV/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Node
-node_modules/
-.next/
-out/
-dist/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Data files (large CSV files)
+*.csv
+backend/data/*.csv
+!backend/data/data.csv.example
 
 # Database
 *.db
 *.sqlite
+*.sqlite3
 
-# Logs
-logs/
-*.log
+# OS
+Thumbs.db
+.DS_Store
 
-# Data files (if sensitive)
-# backend/data/*.csv
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
 
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage/
+
+# Distribution / packaging
+*.whl
+*.tar.gz
+
+# Testing
+.pytest_cache/
+.tox/
+
+# Next.js
+.next/
+out/
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+*.orig
+.cache/

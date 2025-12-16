@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { FilterSection } from '@/components/FilterSection';
 import { DataTable } from '@/components/DataTable';
 import { AudioPlayerModal } from '@/components/AudioPlayerModal';
 import { ChatModal } from '@/components/ChatModal';
 import { MetadataModal } from '@/components/MetadataModal';
+import { CSVPreviewModal } from '@/components/CSVPreviewModal';
 import { CampaignManagement } from '@/components/CampaignManagement';
+import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
-import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2 } from 'lucide-react';
+import { api, setAuthToken, getAuthToken } from '@/lib/api';
 
 interface DataLog {
   id?: number;
@@ -29,6 +33,8 @@ interface DataLog {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [data, setData] = useState<DataLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingSDTC, setLoadingSDTC] = useState(false);
@@ -53,10 +59,67 @@ export default function Home() {
   const [ccdData, setCcdData] = useState<any[]>([]);
   const [loadingCCD, setLoadingCCD] = useState(false);
   const [ccdLimit, setCcdLimit] = useState<number>(50);
+  const [showCSVPreview, setShowCSVPreview] = useState(false);
   const [ccdCurrentPage, setCcdCurrentPage] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<'data-management' | 'campaign-management' | 'reports'>('data-management');
+  const [activeTab, setActiveTab] = useState<'data-management' | 'campaign-management' | 'reports' | 'disposition-tree'>('data-management');
   const [searchColumn, setSearchColumn] = useState<string>('');
   const [searchInput, setSearchInput] = useState<string>('');
+  
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      // Use getAuthToken which checks both cookies and localStorage
+      const token = getAuthToken();
+      if (!token) {
+        router.push('/login');
+        return;
+      }
+
+      try {
+        // api.get will automatically add Authorization header from token
+        const response = await api.get('/auth/verify');
+
+        if (response.ok) {
+          setIsAuthenticated(true);
+        } else {
+          setAuthToken(null);
+          router.push('/login');
+        }
+      } catch (error) {
+        setAuthToken(null);
+        router.push('/login');
+      }
+    };
+
+    checkAuth();
+  }, [router]);
+
+  // Handle URL parameters for shared links
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam === 'disposition-tree') {
+        setActiveTab('disposition-tree');
+      }
+      // Clean up URL after setting tab (optional - keeps URL clean)
+      // if (tabParam === 'disposition-tree') {
+      //   window.history.replaceState({}, '', window.location.pathname);
+      // }
+    }
+  }, []);
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setAuthToken(null);
+      router.push('/login');
+    }
+  };
   
   // Persistent filter states (survive tab switches)
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -82,13 +145,7 @@ export default function Home() {
         campaign_id: selectedCampaignId,
       };
       
-      const response = await fetch('http://localhost:8000/show_data', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await api.post('/show_data', requestBody);
 
       if (!response.ok) {
         throw new Error('Failed to fetch data');
@@ -269,12 +326,7 @@ export default function Home() {
     setCcdCurrentPage(1);
 
     try {
-      const response = await fetch('http://localhost:8000/get_csv_data', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.get('/get_csv_data');
 
       if (!response.ok) {
         console.error('Failed to fetch CCD data');
@@ -323,13 +375,7 @@ export default function Home() {
         return;
       }
 
-      const response = await fetch('http://localhost:8000/cut_ccd', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ contact_values: contactValues }),
-      });
+      const response = await api.post('/cut_ccd', { contact_values: contactValues });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -365,12 +411,7 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/delete_pcd', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await api.delete('/delete_pcd');
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -469,13 +510,7 @@ export default function Home() {
         return filteredRow;
       });
 
-      const response = await fetch('http://localhost:8000/load_sdtc', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ data: dataToSend }),
-      });
+      const response = await api.post('/load_sdtc', { data: dataToSend });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -517,8 +552,87 @@ export default function Home() {
     }
   };
 
+  // Helper function to format chat data for CSV
+  const formatChatForCSV = (chat: any): string => {
+    if (!chat) return '';
+    
+    // If it's an array of messages
+    if (Array.isArray(chat)) {
+      return chat
+        .map((msg: any) => {
+          const role = msg.role || msg.sender || 'unknown';
+          const content = msg.content || msg.message || msg.text || '';
+          return `${role}: ${content}`;
+        })
+        .join(' | ');
+    }
+    
+    // If it's an object with messages property
+    if (typeof chat === 'object' && chat.messages && Array.isArray(chat.messages)) {
+      return formatChatForCSV(chat.messages);
+    }
+    
+    // If it's an object with chat property
+    if (typeof chat === 'object' && chat.chat && Array.isArray(chat.chat)) {
+      return formatChatForCSV(chat.chat);
+    }
+    
+    // If it's a string, try to parse it
+    if (typeof chat === 'string') {
+      try {
+        const parsed = JSON.parse(chat);
+        return formatChatForCSV(parsed);
+      } catch {
+        return chat;
+      }
+    }
+    
+    // Fallback to JSON stringify for other object types
+    return JSON.stringify(chat);
+  };
+
+  // Helper function to format value for CSV
+  const formatValueForCSV = (value: any, column: string): string => {
+    if (value === null || value === undefined) return '';
+    
+    // Special handling for chat column
+    if (column === 'chat') {
+      return formatChatForCSV(value);
+    }
+    
+    // Special handling for meta_data column
+    if (column === 'meta_data') {
+      if (typeof value === 'object') {
+        return JSON.stringify(value);
+      }
+      if (typeof value === 'string') {
+        try {
+          JSON.parse(value); // Check if it's valid JSON
+          return value; // Return as-is if valid JSON string
+        } catch {
+          return value; // Return as-is if not JSON
+        }
+      }
+    }
+    
+    // Handle arrays
+    if (Array.isArray(value)) {
+      return value.map(item => 
+        typeof item === 'object' ? JSON.stringify(item) : String(item)
+      ).join(' | ');
+    }
+    
+    // Handle objects
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    
+    // Handle strings - escape quotes
+    return String(value).replace(/"/g, '""');
+  };
+
   const handleDownloadCSV = () => {
-    if (data.length === 0) {
+    if (filteredData.length === 0) {
       alert('No data to export');
       return;
     }
@@ -532,17 +646,24 @@ export default function Home() {
       return;
     }
 
+    // Show preview modal instead of downloading directly
+    setShowCSVPreview(true);
+  };
+
+  const performCSVDownload = () => {
+    const selectedCols = Object.keys(selectedColumns).filter(
+      (key) => selectedColumns[key]
+    );
+
     // Create CSV content
-    const headers = selectedCols.join(',');
-    const rows = data.map((row) => {
+    const headers = selectedCols.map(col => `"${col}"`).join(',');
+    const rows = filteredData.map((row) => {
       return selectedCols
         .map((col) => {
           const value = (row as any)[col];
-          if (value === null || value === undefined) return '';
-          if (typeof value === 'object') return JSON.stringify(value);
-          return String(value).replace(/"/g, '""');
+          const formattedValue = formatValueForCSV(value, col);
+          return `"${formattedValue}"`;
         })
-        .map((val) => `"${val}"`)
         .join(',');
     });
 
@@ -556,6 +677,9 @@ export default function Home() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    // Close the preview modal
+    setShowCSVPreview(false);
   };
 
   // Get available columns for search dropdown (only selected columns)
@@ -579,15 +703,33 @@ export default function Home() {
     });
   })();
 
+  // Show loading state while checking authentication
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)] mx-auto mb-4" />
+          <p className="text-[var(--secondary)]">Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (will redirect)
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-[var(--background)]">
       <div className="container mx-auto px-4 py-6 max-w-[1920px]">
         {/* Header */}
         <div className="mb-6">
-          <div className="flex items-center gap-4 flex-wrap mb-2">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">
-              Campaign Management Dashboard
-            </h1>
+          <div className="flex items-center justify-between flex-wrap mb-2">
+            <div className="flex items-center gap-4 flex-wrap">
+              <h1 className="text-3xl font-bold text-[var(--foreground)]">
+                Campaign Management Dashboard
+              </h1>
             
             {/* Persistent Filters - Inline with title (Client and Phase only) */}
             <div className="flex-shrink-0">
@@ -602,6 +744,15 @@ export default function Home() {
                 showCampaign={false}
               />
             </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--foreground)] border border-[var(--card-border)] rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
+              title="Logout"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
           </div>
           <p className="text-[var(--secondary)]">
             Filter and analyze campaign data with advanced controls
@@ -648,6 +799,19 @@ export default function Home() {
               <div className="flex items-center gap-2">
                 <Wrench className="w-4 h-4" />
                 Reports
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('disposition-tree')}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+                activeTab === 'disposition-tree'
+                  ? 'border-[var(--primary)] text-[var(--primary)]'
+                  : 'border-transparent text-[var(--secondary)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Network className="w-4 h-4" />
+                Disposition Tree
               </div>
             </button>
           </div>
@@ -969,6 +1133,20 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {activeTab === 'disposition-tree' && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">
+                Disposition Tree Visualization
+              </h2>
+              <p className="text-[var(--secondary)]">
+                Interactive visualization of call disposition outcomes. Node sizes represent relative counts.
+              </p>
+            </div>
+            <DispositionTree />
+          </div>
+        )}
       </div>
 
       {/* Modals */}
@@ -992,6 +1170,17 @@ export default function Home() {
           onClose={() => setSelectedMetadata(null)}
         />
       )}
+
+      {showCSVPreview && (
+        <CSVPreviewModal
+          data={filteredData}
+          selectedColumns={selectedColumns}
+          csvFileName={csvFileName}
+          onClose={() => setShowCSVPreview(false)}
+          onConfirmDownload={performCSVDownload}
+        />
+      )}
+
       {showCCDModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
           <div className="bg-[var(--card-bg)] rounded-lg shadow-xl w-full max-w-6xl mx-4 h-[90vh] flex flex-col border border-[var(--card-border)]">
