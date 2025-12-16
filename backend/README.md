@@ -52,9 +52,6 @@ AUTH_PASSWORD=your_password
 # Millis.ai API (optional)
 MILLIS_API_KEY=your_api_key
 
-# Server Configuration
-HOST=0.0.0.0
-PORT=8000
 ```
 
 ### Run Server
