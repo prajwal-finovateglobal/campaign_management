@@ -1,0 +1,940 @@
+{
+  "nodes": [
+    {
+      "id": "root",
+      "type": "custom",
+      "position": {
+        "x": 500.0,
+        "y": 100.0
+      },
+      "data": {
+        "label": "Total Call Attempts",
+        "count": 10000,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "rpc",
+      "type": "custom",
+      "position": {
+        "x": 995.0,
+        "y": 448.0
+      },
+      "data": {
+        "label": "RPC",
+        "count": 6800,
+        "type": "success"
+      }
+    },
+    {
+      "id": "not-rpc",
+      "type": "custom",
+      "position": {
+        "x": 271.0,
+        "y": 454.0
+      },
+      "data": {
+        "label": "Not RPC",
+        "count": 3200,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "wrong-party",
+      "type": "custom",
+      "position": {
+        "x": 46.0,
+        "y": 642.0
+      },
+      "data": {
+        "label": "Wrong Party Contact",
+        "count": 900,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "third-party",
+      "type": "custom",
+      "position": {
+        "x": 160.0,
+        "y": 782.0
+      },
+      "data": {
+        "label": "Third Party Contact",
+        "count": 600,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "no-response",
+      "type": "custom",
+      "position": {
+        "x": 394.0,
+        "y": 792.0
+      },
+      "data": {
+        "label": "No Response / Silence",
+        "count": 1100,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "call-dropped",
+      "type": "custom",
+      "position": {
+        "x": 486.0,
+        "y": 684.0
+      },
+      "data": {
+        "label": "Call Dropped / Network Issue",
+        "count": 400,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "busy",
+      "type": "custom",
+      "position": {
+        "x": 286.0,
+        "y": 878.0
+      },
+      "data": {
+        "label": "Busy / Callback Requested",
+        "count": 200,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "loan-confirmed",
+      "type": "custom",
+      "position": {
+        "x": 686.0,
+        "y": 756.0
+      },
+      "data": {
+        "label": "Loan Info Confirmed",
+        "count": 5900,
+        "type": "success"
+      }
+    },
+    {
+      "id": "loan-not-accepted",
+      "type": "custom",
+      "position": {
+        "x": 1298.0,
+        "y": 746.0
+      },
+      "data": {
+        "label": "Loan Not Accepted",
+        "count": 900,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "loan-dispute",
+      "type": "custom",
+      "position": {
+        "x": 1183.0,
+        "y": 914.0
+      },
+      "data": {
+        "label": "Loan Dispute (Not My Loan)",
+        "count": 500,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "details-mismatch",
+      "type": "custom",
+      "position": {
+        "x": 1421.0,
+        "y": 1042.0
+      },
+      "data": {
+        "label": "Details Mismatch",
+        "count": 250,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "verification-required",
+      "type": "custom",
+      "position": {
+        "x": 1497.0,
+        "y": 948.0
+      },
+      "data": {
+        "label": "Verification Required",
+        "count": 150,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "payment-outcome",
+      "type": "custom",
+      "position": {
+        "x": 263.0,
+        "y": 1112.0
+      },
+      "data": {
+        "label": "Payment Outcome",
+        "count": 4700,
+        "type": "info"
+      }
+    },
+    {
+      "id": "callback-deferral",
+      "type": "custom",
+      "position": {
+        "x": 825.0,
+        "y": 1144.0
+      },
+      "data": {
+        "label": "Callback / Deferral",
+        "count": 700,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "escalation",
+      "type": "custom",
+      "position": {
+        "x": 1179.0,
+        "y": 1110.0
+      },
+      "data": {
+        "label": "Escalation / Override",
+        "count": 500,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "already-paid",
+      "type": "custom",
+      "position": {
+        "x": 4.0,
+        "y": 1182.0
+      },
+      "data": {
+        "label": "Already Paid",
+        "count": 850,
+        "type": "success"
+      }
+    },
+    {
+      "id": "will-pay-full",
+      "type": "custom",
+      "position": {
+        "x": -544.0,
+        "y": 1340.0
+      },
+      "data": {
+        "label": "Will Pay Full",
+        "count": 1400,
+        "type": "success"
+      }
+    },
+    {
+      "id": "will-pay-token",
+      "type": "custom",
+      "position": {
+        "x": -246.0,
+        "y": 1396.0
+      },
+      "data": {
+        "label": "Will Pay Token",
+        "count": 1250,
+        "type": "success"
+      }
+    },
+    {
+      "id": "will-pay-later",
+      "type": "custom",
+      "position": {
+        "x": 16.0,
+        "y": 1602.0
+      },
+      "data": {
+        "label": "Will Pay Later",
+        "count": 620,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "cannot-pay",
+      "type": "custom",
+      "position": {
+        "x": 496.0,
+        "y": 1344.0
+      },
+      "data": {
+        "label": "Cannot Pay",
+        "count": 580,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "call-later",
+      "type": "custom",
+      "position": {
+        "x": 746.0,
+        "y": 1304.0
+      },
+      "data": {
+        "label": "Asked to Call Later",
+        "count": 420,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "not-willing",
+      "type": "custom",
+      "position": {
+        "x": 900.0,
+        "y": 1304.0
+      },
+      "data": {
+        "label": "Not Willing to Discuss Now",
+        "count": 280,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "human-agent",
+      "type": "custom",
+      "position": {
+        "x": 1324.0,
+        "y": 1288.0
+      },
+      "data": {
+        "label": "Escalated to Human Agent",
+        "count": 300,
+        "type": "info"
+      }
+    },
+    {
+      "id": "senior-legal",
+      "type": "custom",
+      "position": {
+        "x": 1022.0,
+        "y": 1294.0
+      },
+      "data": {
+        "label": "Escalated to Senior / Legal",
+        "count": 120,
+        "type": "info"
+      }
+    },
+    {
+      "id": "emotional-distress",
+      "type": "custom",
+      "position": {
+        "x": 1132.0,
+        "y": 1376.0
+      },
+      "data": {
+        "label": "Emotional Distress",
+        "count": 60,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "compliance-risk",
+      "type": "custom",
+      "position": {
+        "x": 1236.0,
+        "y": 1374.0
+      },
+      "data": {
+        "label": "Compliance Risk",
+        "count": 20,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "pay-today",
+      "type": "custom",
+      "position": {
+        "x": -689.0,
+        "y": 1548.0
+      },
+      "data": {
+        "label": "Pay Today",
+        "count": 980,
+        "type": "success"
+      }
+    },
+    {
+      "id": "pay-later-full",
+      "type": "custom",
+      "position": {
+        "x": -487.0,
+        "y": 1556.0
+      },
+      "data": {
+        "label": "Pay Later",
+        "count": 420,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "min-token",
+      "type": "custom",
+      "position": {
+        "x": -361.0,
+        "y": 1564.0
+      },
+      "data": {
+        "label": "≥ Minimum Token",
+        "count": 870,
+        "type": "success"
+      }
+    },
+    {
+      "id": "below-min-token",
+      "type": "custom",
+      "position": {
+        "x": -141.0,
+        "y": 1580.0
+      },
+      "data": {
+        "label": "< Minimum Token",
+        "count": 380,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "date-given",
+      "type": "custom",
+      "position": {
+        "x": -63.0,
+        "y": 1766.0
+      },
+      "data": {
+        "label": "Date Given (PTP)",
+        "count": 410,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "soft-promise",
+      "type": "custom",
+      "position": {
+        "x": 87.0,
+        "y": 1770.0
+      },
+      "data": {
+        "label": "Soft Promise (No Date)",
+        "count": 210,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "temp-financial-stress",
+      "type": "custom",
+      "position": {
+        "x": 431.0,
+        "y": 1564.0
+      },
+      "data": {
+        "label": "Temporary Financial Stress",
+        "count": 330,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "medical-emergency",
+      "type": "custom",
+      "position": {
+        "x": 609.0,
+        "y": 1618.0
+      },
+      "data": {
+        "label": "Medical Emergency",
+        "count": 150,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "permanent-inability",
+      "type": "custom",
+      "position": {
+        "x": 685.0,
+        "y": 1524.0
+      },
+      "data": {
+        "label": "Permanent Inability",
+        "count": 60,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "flat-refusal",
+      "type": "custom",
+      "position": {
+        "x": 811.0,
+        "y": 1508.0
+      },
+      "data": {
+        "label": "Flat Refusal",
+        "count": 40,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "job-loss",
+      "type": "custom",
+      "position": {
+        "x": 247.0,
+        "y": 1830.0
+      },
+      "data": {
+        "label": "Job Loss",
+        "count": 120,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "salary-delay",
+      "type": "custom",
+      "position": {
+        "x": 625.0,
+        "y": 1846.0
+      },
+      "data": {
+        "label": "Salary Delay",
+        "count": 90,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "crop-failure",
+      "type": "custom",
+      "position": {
+        "x": 351.0,
+        "y": 1962.0
+      },
+      "data": {
+        "label": "Crop Failure",
+        "count": 70,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "festival-pressure",
+      "type": "custom",
+      "position": {
+        "x": 497.0,
+        "y": 1954.0
+      },
+      "data": {
+        "label": "Festival Pressure",
+        "count": 50,
+        "type": "warning"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "root-rpc",
+      "source": "root",
+      "target": "rpc",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "root-not-rpc",
+      "source": "root",
+      "target": "not-rpc",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "not-rpc-wrong-party",
+      "source": "not-rpc",
+      "target": "wrong-party",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "not-rpc-third-party",
+      "source": "not-rpc",
+      "target": "third-party",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "not-rpc-no-response",
+      "source": "not-rpc",
+      "target": "no-response",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "not-rpc-call-dropped",
+      "source": "not-rpc",
+      "target": "call-dropped",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "not-rpc-busy",
+      "source": "not-rpc",
+      "target": "busy",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "rpc-loan-confirmed",
+      "source": "rpc",
+      "target": "loan-confirmed",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "rpc-loan-not-accepted",
+      "source": "rpc",
+      "target": "loan-not-accepted",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "loan-not-accepted-loan-dispute",
+      "source": "loan-not-accepted",
+      "target": "loan-dispute",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "loan-not-accepted-details-mismatch",
+      "source": "loan-not-accepted",
+      "target": "details-mismatch",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "loan-not-accepted-verification-required",
+      "source": "loan-not-accepted",
+      "target": "verification-required",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "loan-confirmed-payment-outcome",
+      "source": "loan-confirmed",
+      "target": "payment-outcome",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "loan-confirmed-callback-deferral",
+      "source": "loan-confirmed",
+      "target": "callback-deferral",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "loan-confirmed-escalation",
+      "source": "loan-confirmed",
+      "target": "escalation",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "payment-outcome-already-paid",
+      "source": "payment-outcome",
+      "target": "already-paid",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "payment-outcome-will-pay-full",
+      "source": "payment-outcome",
+      "target": "will-pay-full",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "payment-outcome-will-pay-token",
+      "source": "payment-outcome",
+      "target": "will-pay-token",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "payment-outcome-will-pay-later",
+      "source": "payment-outcome",
+      "target": "will-pay-later",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "payment-outcome-cannot-pay",
+      "source": "payment-outcome",
+      "target": "cannot-pay",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "callback-deferral-call-later",
+      "source": "callback-deferral",
+      "target": "call-later",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "callback-deferral-not-willing",
+      "source": "callback-deferral",
+      "target": "not-willing",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "escalation-human-agent",
+      "source": "escalation",
+      "target": "human-agent",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "escalation-senior-legal",
+      "source": "escalation",
+      "target": "senior-legal",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "escalation-emotional-distress",
+      "source": "escalation",
+      "target": "emotional-distress",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "escalation-compliance-risk",
+      "source": "escalation",
+      "target": "compliance-risk",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "will-pay-full-pay-today",
+      "source": "will-pay-full",
+      "target": "pay-today",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "will-pay-full-pay-later-full",
+      "source": "will-pay-full",
+      "target": "pay-later-full",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "will-pay-token-min-token",
+      "source": "will-pay-token",
+      "target": "min-token",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "will-pay-token-below-min-token",
+      "source": "will-pay-token",
+      "target": "below-min-token",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "will-pay-later-date-given",
+      "source": "will-pay-later",
+      "target": "date-given",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "will-pay-later-soft-promise",
+      "source": "will-pay-later",
+      "target": "soft-promise",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "cannot-pay-temp-financial-stress",
+      "source": "cannot-pay",
+      "target": "temp-financial-stress",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "cannot-pay-medical-emergency",
+      "source": "cannot-pay",
+      "target": "medical-emergency",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "cannot-pay-permanent-inability",
+      "source": "cannot-pay",
+      "target": "permanent-inability",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "cannot-pay-flat-refusal",
+      "source": "cannot-pay",
+      "target": "flat-refusal",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "temp-financial-stress-job-loss",
+      "source": "temp-financial-stress",
+      "target": "job-loss",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "temp-financial-stress-salary-delay",
+      "source": "temp-financial-stress",
+      "target": "salary-delay",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "temp-financial-stress-crop-failure",
+      "source": "temp-financial-stress",
+      "target": "crop-failure",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "temp-financial-stress-festival-pressure",
+      "source": "temp-financial-stress",
+      "target": "festival-pressure",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 2
+      }
+    }
+  ],
+  "timestamp": "2025-12-15T12:58:13.759Z"
+}

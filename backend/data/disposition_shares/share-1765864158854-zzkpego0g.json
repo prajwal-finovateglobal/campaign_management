@@ -1,0 +1,1086 @@
+{
+  "nodes": [
+    {
+      "id": "a",
+      "type": "custom",
+      "position": {
+        "x": 500.0,
+        "y": 120.0753734722216
+      },
+      "data": {
+        "label": "Call Connected",
+        "count": 156,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "aa",
+      "type": "custom",
+      "position": {
+        "x": 85.79665597714774,
+        "y": 291.6164602032692
+      },
+      "data": {
+        "label": "Not Rpc",
+        "count": 24,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "ab",
+      "type": "custom",
+      "position": {
+        "x": 520.3218874967007,
+        "y": 395.00358126704646
+      },
+      "data": {
+        "label": "Rpc",
+        "count": 76,
+        "type": "success"
+      }
+    },
+    {
+      "id": "ac",
+      "type": "custom",
+      "position": {
+        "x": 862.386526478724,
+        "y": 263.2941049274409
+      },
+      "data": {
+        "label": "Rpc Not Established",
+        "count": 44,
+        "type": "success"
+      }
+    },
+    {
+      "id": "aaa",
+      "type": "custom",
+      "position": {
+        "x": 164.49347340430126,
+        "y": 467.61806517309685
+      },
+      "data": {
+        "label": "Wrong Party Contact",
+        "count": 10,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "aab",
+      "type": "custom",
+      "position": {
+        "x": 39.817375031671446,
+        "y": 467.69753555944055
+      },
+      "data": {
+        "label": "Third Party Contact",
+        "count": 7,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "aac",
+      "type": "custom",
+      "position": {
+        "x": -28.376149137476204,
+        "y": 393.6223908864059
+      },
+      "data": {
+        "label": "No Response Or Silence",
+        "count": 3,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "aad",
+      "type": "custom",
+      "position": {
+        "x": 249.50250910479767,
+        "y": 385.53309994290214
+      },
+      "data": {
+        "label": "Call Dropped Or Network Issue",
+        "count": 2,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "aba",
+      "type": "custom",
+      "position": {
+        "x": 594.992220561511,
+        "y": 864.300418516304
+      },
+      "data": {
+        "label": "Busy Or Callback Requested",
+        "count": 2,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "abb",
+      "type": "custom",
+      "position": {
+        "x": 528.6791049603165,
+        "y": 766.6421619345281
+      },
+      "data": {
+        "label": "Call Dropped After Rpc",
+        "count": 7,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "abc",
+      "type": "custom",
+      "position": {
+        "x": 643.3941437835432,
+        "y": 632.4284812934411
+      },
+      "data": {
+        "label": "Silent After Rpc",
+        "count": 3,
+        "type": "success"
+      }
+    },
+    {
+      "id": "abd",
+      "type": "custom",
+      "position": {
+        "x": 729.2096063264347,
+        "y": 562.9953656797138
+      },
+      "data": {
+        "label": "Loan Information Incorrect",
+        "count": 7,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abe",
+      "type": "custom",
+      "position": {
+        "x": 301.8974095776336,
+        "y": 530.8190438099377
+      },
+      "data": {
+        "label": "Loan Info Confirmed",
+        "count": 47,
+        "type": "success"
+      }
+    },
+    {
+      "id": "aca",
+      "type": "custom",
+      "position": {
+        "x": 865.2772282929914,
+        "y": 454.61196569731044
+      },
+      "data": {
+        "label": "Call Dropped Early",
+        "count": 37,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "acb",
+      "type": "custom",
+      "position": {
+        "x": 1030.6867501979593,
+        "y": 405.5007375802836
+      },
+      "data": {
+        "label": "Silent After Call Connected",
+        "count": 1,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abda",
+      "type": "custom",
+      "position": {
+        "x": 840.9262685525904,
+        "y": 629.3777126088778
+      },
+      "data": {
+        "label": "Loan Dispute Not My Loan",
+        "count": 6,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "abdb",
+      "type": "custom",
+      "position": {
+        "x": 808.127999097196,
+        "y": 800.4099915912852
+      },
+      "data": {
+        "label": "Details Mismatch",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abdc",
+      "type": "custom",
+      "position": {
+        "x": 710.715767189753,
+        "y": 793.4770256282161
+      },
+      "data": {
+        "label": "Verification Required",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abea",
+      "type": "custom",
+      "position": {
+        "x": 169.10026719947592,
+        "y": 739.8946541881503
+      },
+      "data": {
+        "label": "Payment Outcome",
+        "count": 8,
+        "type": "info"
+      }
+    },
+    {
+      "id": "abeb",
+      "type": "custom",
+      "position": {
+        "x": 39.872744613126315,
+        "y": 626.0410334325609
+      },
+      "data": {
+        "label": "Callback Or Deferral",
+        "count": 31,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "abec",
+      "type": "custom",
+      "position": {
+        "x": 476.2625276721833,
+        "y": 589.609758053384
+      },
+      "data": {
+        "label": "Escalation Or Override",
+        "count": 2,
+        "type": "info"
+      }
+    },
+    {
+      "id": "abeaa",
+      "type": "custom",
+      "position": {
+        "x": 76.75336286705482,
+        "y": 802.3440147420915
+      },
+      "data": {
+        "label": "Already Paid",
+        "count": 2,
+        "type": "success"
+      }
+    },
+    {
+      "id": "abeab",
+      "type": "custom",
+      "position": {
+        "x": 174.37723921626906,
+        "y": 972.9846892559751
+      },
+      "data": {
+        "label": "Will Pay Full",
+        "count": 3,
+        "type": "success"
+      }
+    },
+    {
+      "id": "abeac",
+      "type": "custom",
+      "position": {
+        "x": 330.7932807341323,
+        "y": 818.1175224702661
+      },
+      "data": {
+        "label": "Will Pay Token",
+        "count": 1,
+        "type": "success"
+      }
+    },
+    {
+      "id": "abead",
+      "type": "custom",
+      "position": {
+        "x": -123.65561340274712,
+        "y": 795.1742385020123
+      },
+      "data": {
+        "label": "Cannot Pay",
+        "count": 0,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "abeca",
+      "type": "custom",
+      "position": {
+        "x": 483.16622290585633,
+        "y": 719.1286060769096
+      },
+      "data": {
+        "label": "Escalated To Human Agent",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeaba",
+      "type": "custom",
+      "position": {
+        "x": 185.56158249005074,
+        "y": 1106.2690131250308
+      },
+      "data": {
+        "label": "Today",
+        "count": 0,
+        "type": "success"
+      }
+    },
+    {
+      "id": "abeabb",
+      "type": "custom",
+      "position": {
+        "x": 56.62052965276416,
+        "y": 1038.873116468288
+      },
+      "data": {
+        "label": "Will Pay Later",
+        "count": 3,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "abeaca",
+      "type": "custom",
+      "position": {
+        "x": 250.11934199741654,
+        "y": 886.903428135171
+      },
+      "data": {
+        "label": "Today",
+        "count": 0,
+        "type": "success"
+      }
+    },
+    {
+      "id": "abeacb",
+      "type": "custom",
+      "position": {
+        "x": 335.24318969588296,
+        "y": 928.4104311240712
+      },
+      "data": {
+        "label": "Will Pay Later",
+        "count": 0,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "abeada",
+      "type": "custom",
+      "position": {
+        "x": -177.6698337875403,
+        "y": 946.0105854753099
+      },
+      "data": {
+        "label": "Temporary Financial Stress",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeadb",
+      "type": "custom",
+      "position": {
+        "x": -83.1941598325172,
+        "y": 904.104439418383
+      },
+      "data": {
+        "label": "Medical Emergency",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeadc",
+      "type": "custom",
+      "position": {
+        "x": -29.190957712687876,
+        "y": 852.6222371651982
+      },
+      "data": {
+        "label": "Permanent Inability",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeadd",
+      "type": "custom",
+      "position": {
+        "x": 39.52018940262103,
+        "y": 929.1599320557095
+      },
+      "data": {
+        "label": "Flat Refusal Or Unwilling",
+        "count": 0,
+        "type": "failure"
+      }
+    },
+    {
+      "id": "abeabba",
+      "type": "custom",
+      "position": {
+        "x": 9.185086984103862,
+        "y": 1162.1197536012326
+      },
+      "data": {
+        "label": "Date Given Ptp",
+        "count": 2,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeabbb",
+      "type": "custom",
+      "position": {
+        "x": 113.97873957339726,
+        "y": 1157.8178878571846
+      },
+      "data": {
+        "label": "No Date Soft Promise",
+        "count": 0,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "abeacba",
+      "type": "custom",
+      "position": {
+        "x": 280.4557406779015,
+        "y": 981.0667147520753
+      },
+      "data": {
+        "label": "Date Given Ptp",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeacbb",
+      "type": "custom",
+      "position": {
+        "x": 394.0903737996116,
+        "y": 981.0066174929702
+      },
+      "data": {
+        "label": "No Date Soft Promise",
+        "count": 0,
+        "type": "warning"
+      }
+    },
+    {
+      "id": "abeadaa",
+      "type": "custom",
+      "position": {
+        "x": -217.60156389382524,
+        "y": 1080.0388095919325
+      },
+      "data": {
+        "label": "Job Loss",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeadab",
+      "type": "custom",
+      "position": {
+        "x": -125.789271779971,
+        "y": 1079.5210118451168
+      },
+      "data": {
+        "label": "Salary Delay",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeadac",
+      "type": "custom",
+      "position": {
+        "x": -73.24588998379768,
+        "y": 1006.3180123801692
+      },
+      "data": {
+        "label": "Crop Failure",
+        "count": 0,
+        "type": "neutral"
+      }
+    },
+    {
+      "id": "abeadad",
+      "type": "custom",
+      "position": {
+        "x": -269.4217762094729,
+        "y": 1002.3459554705082
+      },
+      "data": {
+        "label": "Festival Or Seasonal Pressure",
+        "count": 0,
+        "type": "neutral"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "a-aa",
+      "source": "a",
+      "target": "aa",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "aa-aaa",
+      "source": "aa",
+      "target": "aaa",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "aa-aab",
+      "source": "aa",
+      "target": "aab",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "aa-aac",
+      "source": "aa",
+      "target": "aac",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "aa-aad",
+      "source": "aa",
+      "target": "aad",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "a-ab",
+      "source": "a",
+      "target": "ab",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ab-aba",
+      "source": "ab",
+      "target": "aba",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ab-abb",
+      "source": "ab",
+      "target": "abb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ab-abc",
+      "source": "ab",
+      "target": "abc",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ab-abd",
+      "source": "ab",
+      "target": "abd",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abd-abda",
+      "source": "abd",
+      "target": "abda",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abd-abdb",
+      "source": "abd",
+      "target": "abdb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abd-abdc",
+      "source": "abd",
+      "target": "abdc",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ab-abe",
+      "source": "ab",
+      "target": "abe",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abe-abea",
+      "source": "abe",
+      "target": "abea",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abea-abeaa",
+      "source": "abea",
+      "target": "abeaa",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abea-abeab",
+      "source": "abea",
+      "target": "abeab",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeab-abeaba",
+      "source": "abeab",
+      "target": "abeaba",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeab-abeabb",
+      "source": "abeab",
+      "target": "abeabb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeabb-abeabba",
+      "source": "abeabb",
+      "target": "abeabba",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeabb-abeabbb",
+      "source": "abeabb",
+      "target": "abeabbb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abea-abeac",
+      "source": "abea",
+      "target": "abeac",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeac-abeaca",
+      "source": "abeac",
+      "target": "abeaca",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeac-abeacb",
+      "source": "abeac",
+      "target": "abeacb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeacb-abeacba",
+      "source": "abeacb",
+      "target": "abeacba",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeacb-abeacbb",
+      "source": "abeacb",
+      "target": "abeacbb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abea-abead",
+      "source": "abea",
+      "target": "abead",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abead-abeada",
+      "source": "abead",
+      "target": "abeada",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeada-abeadaa",
+      "source": "abeada",
+      "target": "abeadaa",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeada-abeadab",
+      "source": "abeada",
+      "target": "abeadab",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeada-abeadac",
+      "source": "abeada",
+      "target": "abeadac",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abeada-abeadad",
+      "source": "abeada",
+      "target": "abeadad",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abead-abeadb",
+      "source": "abead",
+      "target": "abeadb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abead-abeadc",
+      "source": "abead",
+      "target": "abeadc",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abead-abeadd",
+      "source": "abead",
+      "target": "abeadd",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abe-abeb",
+      "source": "abe",
+      "target": "abeb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abe-abec",
+      "source": "abe",
+      "target": "abec",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "abec-abeca",
+      "source": "abec",
+      "target": "abeca",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "a-ac",
+      "source": "a",
+      "target": "ac",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ac-aca",
+      "source": "ac",
+      "target": "aca",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    },
+    {
+      "id": "ac-acb",
+      "source": "ac",
+      "target": "acb",
+      "type": "smoothstep",
+      "animated": true,
+      "style": {
+        "strokeWidth": 3,
+        "stroke": "#6b7280"
+      },
+      "sourceHandle": null,
+      "targetHandle": null
+    }
+  ],
+  "timestamp": "2025-12-16T05:49:18.855Z"
+}

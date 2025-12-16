@@ -10,3 +10,7 @@ pandas
 numpy
 pydantic_settings
 loguru
+langchain
+langchain-openai
+langchain-core
+requests

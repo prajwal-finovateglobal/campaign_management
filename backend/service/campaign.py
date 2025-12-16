@@ -1,6 +1,6 @@
 from database.dependencies import DB_DEPENDENCY
 from repo.tables import get_campaign
-from service.millis_api import get_campaign_details, create_campaign_in_millis, delete_campaign_in_millis, upload_records_to_millis, get_phones, get_agent, set_caller, start_campaign, stop_campaign_millis, delete_record_millis
+from service.millis_api import get_campaign_details, create_campaign_in_millis, delete_campaign_in_millis, upload_records_to_millis, get_phones, get_agent, set_caller, start_campaign, stop_campaign_millis, delete_record_millis, get_campaign_info
 from service.csv_service import read_csv_data
 from models.client import Campaign, Phase
 from typing import Optional, List, Dict, Any, Tuple
@@ -588,6 +588,12 @@ def start_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, O
     """
     Start a campaign in Millis.ai.
     
+    This function validates that:
+    1. Campaign exists in database
+    2. Campaign has a CID (Millis.ai campaign ID)
+    3. Campaign has a caller set in Millis.ai API (fetched from /campaigns/{cid}/info endpoint)
+    4. Then calls Millis.ai API to start the campaign
+    
     Args:
         db: Database session
         campaign_id: Campaign ID in database
@@ -595,32 +601,82 @@ def start_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, O
     Returns:
         Tuple of (success, error_message)
     """
-    logger.info(f"Starting campaign {campaign_id}")
+    logger.info(f"[START_CAMPAIGN] Received request to start campaign ID: {campaign_id}")
     
     try:
+        # Step 1: Get campaign from database
+        logger.info(f"[START_CAMPAIGN] Step 1: Fetching campaign {campaign_id} from database")
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
         if not campaign:
             error_msg = f"Campaign with id {campaign_id} not found"
-            logger.error(error_msg)
+            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
             return False, error_msg
         
+        logger.info(f"[START_CAMPAIGN] Campaign found: name='{campaign.campaign_name}', cid='{campaign.cid}', phone_id='{campaign.phone_id}', agent_id='{campaign.agent_id}'")
+        
+        # Step 2: Validate CID exists
         if not campaign.cid:
-            error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
-            logger.error(error_msg)
+            error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID). Cannot start campaign without CID."
+            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
             return False, error_msg
         
+        logger.info(f"[START_CAMPAIGN] Step 2: CID validation passed. CID: {campaign.cid}")
+        
+        # Step 3: Validate caller is set in Millis.ai API (CRITICAL CHECK - Check from API, not DB)
+        logger.info(f"[START_CAMPAIGN] Step 3: Fetching campaign info from Millis.ai API to verify caller is set")
+        millis_success, millis_error, millis_campaign_info = get_campaign_info(campaign.cid)
+        
+        if not millis_success or not millis_campaign_info:
+            error_msg = millis_error or f"Campaign {campaign_id} (CID: {campaign.cid}) not found in Millis.ai API"
+            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+            return False, error_msg
+        
+        # Log all available fields from Millis.ai API for debugging
+        logger.info(f"[START_CAMPAIGN] Millis.ai campaign info fields: {list(millis_campaign_info.keys())}")
+        logger.debug(f"[START_CAMPAIGN] Full Millis.ai campaign info: {millis_campaign_info}")
+        
+        # Check for caller in Millis.ai API response
+        # Millis.ai API returns caller as "caller" field
+        millis_caller = millis_campaign_info.get("caller")
+        
+        # Also log DB values for reference
+        db_phone_id = campaign.phone_id
+        db_agent_id = campaign.agent_id
+        
+        logger.info(f"[START_CAMPAIGN] Caller check - Millis.ai API: caller={millis_caller}, DB: phone_id={db_phone_id}, agent_id={db_agent_id}")
+        
+        # Validate caller is set in Millis.ai API
+        if not millis_caller:
+            error_msg = f"Campaign {campaign_id} (CID: {campaign.cid}) has no caller set in Millis.ai API. Please set a caller phone before starting the campaign. Campaign cannot make calls without a caller."
+            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+            logger.error(f"[START_CAMPAIGN] Millis.ai campaign info: {millis_campaign_info}")
+            logger.error(f"[START_CAMPAIGN] DB campaign data - phone_id: {db_phone_id}, agent_id: {db_agent_id}")
+            return False, error_msg
+        
+        logger.info(f"[START_CAMPAIGN] Step 3: Caller validation passed (from Millis.ai API). Caller: {millis_caller}")
+        
+        # Warn if DB and API are out of sync
+        if millis_caller != db_phone_id:
+            logger.warning(f"[START_CAMPAIGN] WARNING: Caller mismatch - Millis.ai API caller: {millis_caller}, DB phone_id: {db_phone_id}. Using caller from Millis.ai API.")
+        
+        # Step 4: Call Millis.ai API to start campaign
+        logger.info(f"[START_CAMPAIGN] Step 4: Calling Millis.ai API to start campaign CID: {campaign.cid}")
         millis_success, millis_error = start_campaign(campaign.cid)
+        
         if not millis_success:
             error_msg = millis_error or "Failed to start campaign in Millis.ai"
-            logger.error(error_msg)
+            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+            logger.error(f"[START_CAMPAIGN] Campaign {campaign_id} (CID: {campaign.cid}) failed to start in Millis.ai")
             return False, error_msg
         
-        logger.info(f"Successfully started campaign {campaign_id}")
+        logger.info(f"[START_CAMPAIGN] SUCCESS: Campaign {campaign_id} (CID: {campaign.cid}) started successfully in Millis.ai")
+        logger.info(f"[START_CAMPAIGN] Campaign caller details - Millis.ai API caller: {millis_caller}, DB phone_id: {db_phone_id}, DB agent_id: {db_agent_id}")
         return True, None
         
     except Exception as e:
         error_msg = f"Error starting campaign: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"[START_CAMPAIGN] EXCEPTION: {error_msg}")
+        logger.exception(f"[START_CAMPAIGN] Full exception traceback for campaign {campaign_id}")
         return False, error_msg
 
 

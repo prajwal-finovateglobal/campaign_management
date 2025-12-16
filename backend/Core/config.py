@@ -28,6 +28,12 @@ DB_URL = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAM
 MILLIS_API_KEY: str = os.getenv("MILLIS_API_KEY", "")
 MILLIS_API_BASE_URL: str = "https://api-west.millis.ai"
 
+# Authentication Configuration
+# Supports multiple env variable names for flexibility:
+# Priority: AUTH_USER > AUTH_USERNAME > USER (to avoid conflicts with system USER variable)
+AUTH_USER: str = os.getenv("AUTH_USER", os.getenv("AUTH_USERNAME", os.getenv("USER", "")))
+AUTH_PASSWORD: str = os.getenv("AUTH_PASSWORD", os.getenv("PASSWORD", ""))
+
 
 class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"

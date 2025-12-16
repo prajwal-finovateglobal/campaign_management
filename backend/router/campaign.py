@@ -379,11 +379,13 @@ def start_campaign_endpoint(request: StartCampaignRequest, db: DB_DEPENDENCY = N
     Returns:
         StartCampaignResponse with success status
     """
-    logger.info(f"Starting campaign {request.campaign_id}")
+    logger.info(f"[ROUTER] /campaign/start endpoint called with campaign_id: {request.campaign_id}")
+    logger.info(f"[ROUTER] Request details: campaign_id={request.campaign_id}")
     
     success, error_msg = start_campaign_service(db, request.campaign_id)
     
     if not success:
+        logger.error(f"[ROUTER] Campaign start failed: campaign_id={request.campaign_id}, error={error_msg}")
         raise HTTPException(
             status_code=500,
             detail={
@@ -392,6 +394,7 @@ def start_campaign_endpoint(request: StartCampaignRequest, db: DB_DEPENDENCY = N
             }
         )
     
+    logger.info(f"[ROUTER] Campaign start successful: campaign_id={request.campaign_id}")
     return StartCampaignResponse(
         success=True,
         message="Successfully started campaign"

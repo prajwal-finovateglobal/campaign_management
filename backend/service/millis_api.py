@@ -501,6 +501,73 @@ def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]
         return False, error_msg
 
 
+def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Get campaign info from Millis.ai API using /campaigns/{cid}/info endpoint.
+    
+    Args:
+        campaign_id: Campaign ID (CID) in Millis.ai
+    
+    Returns:
+        Tuple of (success, error_message, campaign_info)
+        - success: Whether operation succeeded
+        - error_message: Error message if failed, None if succeeded
+        - campaign_info: Campaign info dictionary if succeeded, None if failed
+    """
+    logger.info(f"[MILLIS_API] get_campaign_info called with campaign_id (CID): {campaign_id}")
+    
+    if not MILLIS_API_KEY:
+        error_msg = "MILLIS_API_KEY not configured"
+        logger.error(f"[MILLIS_API] ERROR: {error_msg}")
+        return False, error_msg, None
+    
+    if not campaign_id:
+        error_msg = "Campaign ID is required"
+        logger.error(f"[MILLIS_API] ERROR: {error_msg}")
+        return False, error_msg, None
+    
+    try:
+        url = f"{MILLIS_API_BASE_URL}/campaigns/{campaign_id}/info"
+        headers = {
+            "authorization": MILLIS_API_KEY
+        }
+        
+        logger.info(f"[MILLIS_API] Making GET request to Millis.ai API")
+        logger.info(f"[MILLIS_API] URL: {url}")
+        logger.info(f"[MILLIS_API] Campaign ID (CID): {campaign_id}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        logger.info(f"[MILLIS_API] Response received - Status Code: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
+            logger.error(f"[MILLIS_API] ERROR: {error_msg}")
+            return False, error_msg, None
+        
+        try:
+            campaign_info = response.json()
+            logger.info(f"[MILLIS_API] Successfully fetched campaign info for CID: {campaign_id}")
+            logger.info(f"[MILLIS_API] Campaign info fields: {list(campaign_info.keys())}")
+            logger.debug(f"[MILLIS_API] Full campaign info: {campaign_info}")
+            return True, None, campaign_info
+        except ValueError as e:
+            error_msg = f"Millis.ai API returned invalid JSON: {response.text[:200]}"
+            logger.error(f"[MILLIS_API] ERROR: {error_msg}")
+            return False, error_msg, None
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Error fetching campaign info from Millis.ai: {e}"
+        logger.error(f"[MILLIS_API] REQUEST_EXCEPTION: {error_msg}")
+        logger.exception(f"[MILLIS_API] Full exception traceback for campaign {campaign_id}")
+        return False, error_msg, None
+    except Exception as e:
+        error_msg = f"Unexpected error in get_campaign_info: {e}"
+        logger.error(f"[MILLIS_API] EXCEPTION: {error_msg}")
+        logger.exception(f"[MILLIS_API] Full exception traceback for campaign {campaign_id}")
+        return False, error_msg, None
+
+
 def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
     """
     Start a campaign in Millis.ai API.
@@ -513,67 +580,83 @@ def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
         - success: Whether operation succeeded
         - error_message: Error message if failed, None if succeeded
     """
+    logger.info(f"[MILLIS_API] start_campaign called with campaign_id (CID): {campaign_id}")
+    
+    # Validate API key
     if not MILLIS_API_KEY:
         error_msg = "MILLIS_API_KEY not configured"
-        logger.error(error_msg)
+        logger.error(f"[MILLIS_API] ERROR: {error_msg}")
         return False, error_msg
     
+    # Validate campaign_id
     if not campaign_id:
         error_msg = "Campaign ID is required"
-        logger.error(error_msg)
+        logger.error(f"[MILLIS_API] ERROR: {error_msg}")
         return False, error_msg
     
     try:
+        # Construct API URL and headers
         url = f"{MILLIS_API_BASE_URL}/campaigns/{campaign_id}/start"
         headers = {
             "authorization": MILLIS_API_KEY
         }
         
-        logger.info(f"Starting campaign {campaign_id} in Millis.ai")
+        logger.info(f"[MILLIS_API] Making POST request to Millis.ai API")
+        logger.info(f"[MILLIS_API] URL: {url}")
+        logger.info(f"[MILLIS_API] Campaign ID (CID): {campaign_id}")
+        logger.info(f"[MILLIS_API] Headers: authorization=[REDACTED]")
+        
+        # Make API request
         response = requests.post(url, headers=headers, timeout=30)
+        
+        logger.info(f"[MILLIS_API] Response received - Status Code: {response.status_code}")
         
         if response.status_code != 200:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
-            logger.error(error_msg)
+            logger.error(f"[MILLIS_API] ERROR: {error_msg}")
+            logger.error(f"[MILLIS_API] Failed to start campaign CID: {campaign_id}")
             return False, error_msg
         
         # Handle empty response or non-JSON response
         response_text = response.text.strip()
         if not response_text:
             if response.status_code == 200:
-                logger.info(f"Successfully started campaign {campaign_id} (empty response)")
+                logger.info(f"[MILLIS_API] SUCCESS: Campaign {campaign_id} started successfully (empty response)")
                 return True, None
             else:
                 error_msg = f"Millis.ai API returned empty response with status {response.status_code}"
-                logger.error(error_msg)
+                logger.error(f"[MILLIS_API] ERROR: {error_msg}")
                 return False, error_msg
         
         # Try to parse JSON response
         try:
             result = response.json()
+            logger.info(f"[MILLIS_API] Response JSON: {result}")
             if isinstance(result, dict) and "success" in result:
                 if not result.get("success", False):
                     error_msg = f"Millis.ai API returned success=false: {result}"
-                    logger.error(error_msg)
+                    logger.error(f"[MILLIS_API] ERROR: {error_msg}")
                     return False, error_msg
-            logger.info(f"Successfully started campaign {campaign_id}")
+            logger.info(f"[MILLIS_API] SUCCESS: Campaign {campaign_id} started successfully")
             return True, None
         except ValueError as e:
             if response.status_code == 200:
-                logger.info(f"Successfully started campaign {campaign_id} (non-JSON response: {response_text[:100]})")
+                logger.info(f"[MILLIS_API] SUCCESS: Campaign {campaign_id} started successfully (non-JSON response: {response_text[:100]})")
                 return True, None
             else:
                 error_msg = f"Millis.ai API returned invalid JSON: {response_text[:200]}"
-                logger.error(error_msg)
+                logger.error(f"[MILLIS_API] ERROR: {error_msg}")
                 return False, error_msg
         
     except requests.exceptions.RequestException as e:
         error_msg = f"Error starting campaign in Millis.ai: {e}"
-        logger.error(error_msg)
+        logger.error(f"[MILLIS_API] REQUEST_EXCEPTION: {error_msg}")
+        logger.exception(f"[MILLIS_API] Full exception traceback for campaign {campaign_id}")
         return False, error_msg
     except Exception as e:
         error_msg = f"Unexpected error in start_campaign: {e}"
-        logger.error(error_msg)
+        logger.error(f"[MILLIS_API] EXCEPTION: {error_msg}")
+        logger.exception(f"[MILLIS_API] Full exception traceback for campaign {campaign_id}")
         return False, error_msg
 
 
