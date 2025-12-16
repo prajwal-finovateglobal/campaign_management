@@ -98,18 +98,11 @@ echo -e "${GREEN}[6/6]${NC} Checking .env.local file..."
 if [ ! -f ".env.local" ]; then
     echo -e "${YELLOW}⚠${NC} .env.local file not found. Creating template..."
     cat > .env.local << 'ENVEOF'
-# Frontend Environment Variables
-# Update NEXT_PUBLIC_API_URL with your AWS backend URL
-
-# For AWS Deployment, change to your backend URL:
-NEXT_PUBLIC_API_URL=http://localhost:8000
-
-# Examples:
-# NEXT_PUBLIC_API_URL=https://api.yourdomain.com
-# NEXT_PUBLIC_API_URL=https://your-app.elasticbeanstalk.com
-# NEXT_PUBLIC_API_URL=https://abc123.execute-api.us-east-1.amazonaws.com/prod
+# Backend API URL Configuration
+# Frontend uses this backend URL for all API calls
+NEXT_PUBLIC_API_URL=https://cms-backend.finovateglobal.com
 ENVEOF
-    echo -e "${YELLOW}⚠${NC} Please update .env.local file with your AWS backend URL before running the server"
+    echo -e "${GREEN}✓${NC} .env.local created with production backend URL"
 else
     echo -e "${GREEN}✓${NC} .env.local file found"
 fi

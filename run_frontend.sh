@@ -42,7 +42,7 @@ fi
 # Check if .env.local exists
 if [ ! -f "$FRONTEND_DIR/.env.local" ]; then
     echo -e "${YELLOW}WARNING: .env.local file not found!${NC}"
-    echo -e "${YELLOW}Server will use default API URL (http://localhost:8000)${NC}"
+    echo -e "${YELLOW}Server will use default API URL (https://cms-backend.finovateglobal.com)${NC}"
 fi
 
 # Navigate to frontend directory
@@ -53,7 +53,7 @@ if [ -f ".env.local" ]; then
     echo -e "${GREEN}[1/3]${NC} Loading environment variables..."
     export $(cat .env.local | grep -v '^#' | xargs)
     echo -e "${GREEN}✓${NC} Environment variables loaded"
-    echo -e "${GREEN}  Backend URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}${NC}"
+    echo -e "${GREEN}  Backend URL: ${NEXT_PUBLIC_API_URL:-https://cms-backend.finovateglobal.com}${NC}"
 else
     echo -e "${YELLOW}[1/3]${NC} No .env.local file found, using defaults"
 fi

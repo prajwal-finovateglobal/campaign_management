@@ -2,7 +2,7 @@
  * API utility for making backend requests
  * Uses relative URLs so requests are proxied through Next.js
  */
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://cms-backend.finovateglobal.com';
 
 import { getCookie, setCookie, deleteCookie } from './cookies';
 

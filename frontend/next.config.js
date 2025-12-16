@@ -4,7 +4,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8000/:path*', // Proxy to backend
+        destination: 'https://cms-backend.finovateglobal.com/:path*', // Proxy to backend
       },
     ];
   },

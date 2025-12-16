@@ -538,7 +538,7 @@ export function CampaignManagement() {
       
       console.log(`[FRONTEND] Making POST request to /campaign/start`);
       console.log(`[FRONTEND] Request body:`, requestBody);
-      console.log(`[FRONTEND] Request URL: http://localhost:8000/campaign/start`);
+      console.log(`[FRONTEND] Request URL: https://cms-backend.finovateglobal.com/campaign/start`);
       
       const response = await api.post('/campaign/start', requestBody);
 
