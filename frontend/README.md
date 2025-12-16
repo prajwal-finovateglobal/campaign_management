@@ -43,7 +43,7 @@ NEXT_PUBLIC_API_URL=https://your-aws-backend-url.com
 npm run dev
 ```
 
-Frontend will be available at `http://localhost:3000`
+Frontend will be available at `http://localhost:8013`
 
 ### Production Build
 

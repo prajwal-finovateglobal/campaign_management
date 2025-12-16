@@ -70,11 +70,11 @@ case "$MODE" in
         echo "=========================================="
         echo ""
         echo "Frontend will be available at:"
-        echo "  http://localhost:3000"
+        echo "  http://localhost:8013"
         echo ""
         echo "Press Ctrl+C to stop the server"
         echo ""
-        npm run dev
+        PORT=8013 npm run dev
         ;;
     
     build)
@@ -102,11 +102,11 @@ case "$MODE" in
         echo "=========================================="
         echo ""
         echo "Frontend will be available at:"
-        echo "  http://localhost:3000"
+        echo "  http://localhost:8013"
         echo ""
         echo "Press Ctrl+C to stop the server"
         echo ""
-        npm run start
+        PORT=8013 npm run start
         ;;
     
     *)

@@ -84,7 +84,7 @@ Backend runs on `http://localhost:8000`
 ```bash
 bash run_frontend.sh
 ```
-Frontend runs on `http://localhost:3000`
+Frontend runs on `http://localhost:8013`
 
 ### Stop Servers
 
@@ -179,7 +179,7 @@ All scripts are located in the project root directory. Make them executable with
 - Starts Next.js frontend server
 - Supports three modes: `dev`, `build`, `start`
 - Loads environment variables from `.env.local`
-- Server runs on `http://localhost:3000`
+- Server runs on `http://localhost:8013`
 - **Usage:** 
   - `bash run_frontend.sh` (development mode)
   - `bash run_frontend.sh build` (build for production)
