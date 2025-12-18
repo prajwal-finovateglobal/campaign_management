@@ -51,7 +51,11 @@ interface Agent {
   [key: string]: any;
 }
 
-export function CampaignManagement() {
+interface CampaignManagementProps {
+  selectedClientId: number | null;
+}
+
+export function CampaignManagement({ selectedClientId }: CampaignManagementProps) {
   const [csvData, setCsvData] = useState<CSVData[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({});
@@ -62,11 +66,8 @@ export function CampaignManagement() {
   
   // Phase management states
   const [phaseMode, setPhaseMode] = useState<'existing' | 'new'>('existing');
-  const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [phases, setPhases] = useState<Phase[]>([]);
   const [selectedPhaseId, setSelectedPhaseId] = useState<number | null>(null);
-  const [loadingClients, setLoadingClients] = useState(false);
   const [loadingPhases, setLoadingPhases] = useState(false);
   const [creatingPhase, setCreatingPhase] = useState(false);
   const [phaseMessage, setPhaseMessage] = useState<string | null>(null);
@@ -137,30 +138,6 @@ export function CampaignManagement() {
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch clients on component mount
-  useEffect(() => {
-    const fetchClients = async () => {
-      setLoadingClients(true);
-      try {
-        const response = await api.get('/client');
-
-        if (response.ok) {
-          const result = await response.json();
-          setClients(result.clients || []);
-          // Set first client as default if available
-          if (result.clients && result.clients.length > 0) {
-            setSelectedClientId(result.clients[0].id);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching clients:', error);
-      } finally {
-        setLoadingClients(false);
-      }
-    };
-
-    fetchClients();
-  }, []);
 
   // Fetch phases when client is selected
   useEffect(() => {
@@ -702,31 +679,6 @@ export function CampaignManagement() {
             </div>
           </div>
 
-          {/* Client Selection Dropdown */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-[var(--foreground)] whitespace-nowrap">
-              Client:
-            </label>
-            <div className="relative w-48">
-              <select
-                value={selectedClientId || ''}
-                onChange={(e) => {
-                  setSelectedClientId(Number(e.target.value));
-                  setSelectedPhaseId(null);
-                }}
-                disabled={loadingClients}
-                className="w-full px-3 py-2 pr-8 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select client</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--secondary)] pointer-events-none" />
-            </div>
-          </div>
 
           {/* Existing Phase Dropdown or Create Phase Button */}
           {phaseMode === 'existing' ? (

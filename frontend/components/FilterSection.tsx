@@ -17,11 +17,18 @@ import {
 interface FilterSectionProps {
   onApply: (filters: any) => void;
   loading: boolean;
+  selectedClientId?: number | null;
   selectedPhaseId?: number | null;
   selectedCampaignId?: number | null;
+  onPhaseChange?: (phaseId: number | null) => void;
   onCampaignChange?: (campaignId: number | null) => void;
 }
 
+interface Phase {
+  id: number;
+  name: string;
+  client_id: number;
+}
 
 interface Campaign {
   id: number;
@@ -31,8 +38,10 @@ interface Campaign {
 export function FilterSection({ 
   onApply, 
   loading, 
+  selectedClientId,
   selectedPhaseId, 
   selectedCampaignId, 
+  onPhaseChange,
   onCampaignChange 
 }: FilterSectionProps) {
   const [startTime, setStartTime] = useState<Date | null>(null);
@@ -43,9 +52,40 @@ export function FilterSection({
   const [durationUnit, setDurationUnit] = useState<'sec' | 'min'>('sec');
   const [durationMin, setDurationMin] = useState<number>(0);
   const [durationMax, setDurationMax] = useState<number>(0);
+  const [phases, setPhases] = useState<Phase[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loadingPhases, setLoadingPhases] = useState(false);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [localPhaseId, setLocalPhaseId] = useState<string>(selectedPhaseId?.toString() || '');
   const [localCampaignId, setLocalCampaignId] = useState<string>(selectedCampaignId?.toString() || '');
+
+  // Fetch phases when client changes
+  useEffect(() => {
+    if (!selectedClientId) {
+      setPhases([]);
+      setLocalPhaseId('');
+      onPhaseChange?.(null);
+      return;
+    }
+
+    const fetchPhases = async () => {
+      setLoadingPhases(true);
+      try {
+        const response = await api.get(`/phase?client_id=${selectedClientId}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch phases');
+        }
+        const result = await response.json();
+        setPhases(result.phases || []);
+      } catch (error) {
+        console.error('Error fetching phases:', error);
+      } finally {
+        setLoadingPhases(false);
+      }
+    };
+
+    fetchPhases();
+  }, [selectedClientId, onPhaseChange]);
 
   // Fetch campaigns when phase changes
   useEffect(() => {
@@ -75,10 +115,21 @@ export function FilterSection({
     fetchCampaigns();
   }, [selectedPhaseId, onCampaignChange]);
 
+  // Sync local phase ID with prop
+  useEffect(() => {
+    setLocalPhaseId(selectedPhaseId?.toString() || '');
+  }, [selectedPhaseId]);
+
   // Sync local campaign ID with prop
   useEffect(() => {
     setLocalCampaignId(selectedCampaignId?.toString() || '');
   }, [selectedCampaignId]);
+
+  const handlePhaseChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedId = e.target.value;
+    setLocalPhaseId(selectedId);
+    onPhaseChange?.(selectedId ? parseInt(selectedId) : null);
+  };
 
   const handleCampaignChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedId = e.target.value;
@@ -287,6 +338,40 @@ export function FilterSection({
                 className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--card-bg)] text-[var(--foreground)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Phase Box */}
+        <div className="bg-[var(--input-bg)] border border-[var(--card-border)] rounded-lg p-4 space-y-3">
+          <label className="text-sm font-semibold text-[var(--foreground)] block">
+            Phase
+          </label>
+          <div className="relative">
+            <select
+              value={localPhaseId}
+              onChange={handlePhaseChange}
+              className="w-full px-3 py-2 pr-8 border border-[var(--input-border)] rounded-md bg-[var(--card-bg)] text-[var(--foreground)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loadingPhases || !selectedClientId}
+            >
+              <option value="">
+                {!selectedClientId 
+                  ? 'Select client first' 
+                  : loadingPhases 
+                    ? 'Loading...' 
+                    : 'All phases'}
+              </option>
+              {phases.map((phase) => (
+                <option key={phase.id} value={phase.id}>
+                  {phase.name}
+                </option>
+              ))}
+            </select>
+            {loadingPhases && (
+              <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--secondary)] animate-spin" />
+            )}
+            {!loadingPhases && (
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--secondary)] pointer-events-none" />
+            )}
           </div>
         </div>
 

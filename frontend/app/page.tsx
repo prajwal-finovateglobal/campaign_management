@@ -731,17 +731,15 @@ export default function Home() {
                 Campaign Management Dashboard
               </h1>
             
-            {/* Persistent Filters - Inline with title (Client and Phase only) */}
+            {/* Persistent Filters - Inline with title (Client only) */}
             <div className="flex-shrink-0">
               <PersistentFilters
                 onClientChange={(clientId, tableName) => {
                   setSelectedClientId(clientId);
                   setSelectedClientTableName(tableName);
+                  // Reset phase when client changes
+                  setSelectedPhaseId(null);
                 }}
-                onPhaseChange={(phaseId) => {
-                  setSelectedPhaseId(phaseId);
-                }}
-                showCampaign={false}
               />
             </div>
             </div>
@@ -818,16 +816,17 @@ export default function Home() {
         </div>
 
         {/* Tab Content */}
-        {activeTab === 'data-management' && (
-          <div>
-
+        {/* Data Management Tab */}
+        <div className={activeTab === 'data-management' ? '' : 'hidden'}>
         {/* Filter Section */}
         <div className="mb-6">
           <FilterSection 
             onApply={handleApplyFilters} 
             loading={loading}
+            selectedClientId={selectedClientId}
             selectedPhaseId={selectedPhaseId}
             selectedCampaignId={selectedCampaignId}
+            onPhaseChange={(phaseId) => setSelectedPhaseId(phaseId)}
             onCampaignChange={(campaignId) => setSelectedCampaignId(campaignId)}
           />
         </div>
@@ -1111,16 +1110,15 @@ export default function Home() {
                 onViewMetadata={(metadata) => setSelectedMetadata(metadata)}
               />
             </div>
-          </div>
-        )}
+        </div>
 
-        {activeTab === 'campaign-management' && (
-          <div>
-            <CampaignManagement />
-          </div>
-        )}
+        {/* Campaign Management Tab */}
+        <div className={activeTab === 'campaign-management' ? '' : 'hidden'}>
+          <CampaignManagement selectedClientId={selectedClientId} />
+        </div>
 
-        {activeTab === 'reports' && (
+        {/* Reports Tab */}
+        <div className={activeTab === 'reports' ? '' : 'hidden'}>
           <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
             <div className="text-center">
               <Wrench className="w-16 h-16 mx-auto mb-4 text-[var(--secondary)]" />
@@ -1132,9 +1130,10 @@ export default function Home() {
               </p>
             </div>
           </div>
-        )}
+        </div>
 
-        {activeTab === 'disposition-tree' && (
+        {/* Disposition Tree Tab */}
+        <div className={activeTab === 'disposition-tree' ? '' : 'hidden'}>
           <div className="space-y-4">
             <div>
               <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">
@@ -1146,7 +1145,7 @@ export default function Home() {
             </div>
             <DispositionTree />
           </div>
-        )}
+        </div>
       </div>
 
       {/* Modals */}
