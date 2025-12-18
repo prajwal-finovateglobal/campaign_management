@@ -97,6 +97,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [settingCid, setSettingCid] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingStatus, setRefreshingStatus] = useState<number | null>(null);
+  const [refreshingAllStatus, setRefreshingAllStatus] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
     show: boolean;
     campaignId: number | null;
@@ -892,7 +893,49 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                             CID
                           </th>
                           <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">
-                            Status
+                            <div className="flex items-center gap-2">
+                              <span>Status</span>
+                              <button
+                                onClick={async () => {
+                                  if (!selectedPhaseId) {
+                                    alert('Please select a phase first');
+                                    return;
+                                  }
+                                  setRefreshingAllStatus(true);
+                                  try {
+                                    const response = await api.post(`/campaign/refresh-all-status?phase_id=${selectedPhaseId}`);
+
+                                    if (!response.ok) {
+                                      const errorData = await response.json();
+                                      const errorDetail = errorData.detail || errorData;
+                                      alert(errorDetail.message || 'Failed to refresh all statuses');
+                                    } else {
+                                      const result = await response.json();
+                                      // Update all campaigns with refreshed statuses
+                                      if (result.campaigns) {
+                                        setCampaigns(prevCampaigns => {
+                                          const updatedMap = new Map(result.campaigns.map((c: any) => [c.id, c]));
+                                          return prevCampaigns.map(c => {
+                                            const updated = updatedMap.get(c.id);
+                                            return updated ? { ...c, status: updated.status } : c;
+                                          });
+                                        });
+                                      }
+                                    }
+                                  } catch (error: any) {
+                                    console.error('Error refreshing all statuses:', error);
+                                    alert(`Error: ${error.message || 'Failed to refresh all statuses'}`);
+                                  } finally {
+                                    setRefreshingAllStatus(false);
+                                  }
+                                }}
+                                disabled={refreshingAllStatus || !selectedPhaseId}
+                                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors disabled:opacity-50"
+                                title="Refresh all campaign statuses from Millis.ai"
+                              >
+                                <RefreshCw className={`w-3 h-3 text-[var(--secondary)] ${refreshingAllStatus ? 'animate-spin' : ''}`} />
+                              </button>
+                            </div>
                           </th>
                           <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">
                             Record Count

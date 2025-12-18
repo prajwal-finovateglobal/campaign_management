@@ -1,6 +1,6 @@
 from database.dependencies import DB_DEPENDENCY
 from repo.tables import get_campaign
-from service.millis_api import get_campaign_details, create_campaign_in_millis, delete_campaign_in_millis, upload_records_to_millis, get_phones, get_agent, set_caller, start_campaign, stop_campaign_millis, delete_record_millis, get_campaign_info
+from service.millis_api import get_campaign_details, create_campaign_in_millis, delete_campaign_in_millis, upload_records_to_millis, get_phones, get_agent, set_caller, start_campaign, stop_campaign_millis, delete_record_millis, get_campaign_info, get_campaign_info_batch
 from service.csv_service import read_csv_data
 from models.client import Campaign, Phase
 from typing import Optional, List, Dict, Any, Tuple
@@ -12,16 +12,21 @@ logger = loguru.logger
 def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, phase_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get campaign data from the database with enriched record counts from Millis.ai API.
+    Uses DB values first, only fetches from Millis if record_count or status is null.
     Returns a list of dictionaries with campaign information including record_count.
     """
     logger.info(f"Getting campaign data for campaign_id: {campaign_id}, phase_id: {phase_id}")
     result = get_campaign(db, campaign_id, phase_id)
     
-    # Convert ORM objects to dictionaries and collect CIDs
+    # Convert ORM objects to dictionaries and collect CIDs that need fetching
     campaigns = []
     cids_to_fetch = []
     
     for campaign in result:
+        # Use DB values first, only fetch from Millis if null
+        record_count = campaign.records_count if campaign.records_count is not None else None
+        status = campaign.status if campaign.status is not None else None
+        
         campaign_dict = {
             'id': campaign.id,
             'campaign_name': campaign.campaign_name,
@@ -31,33 +36,40 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
             'cid': campaign.cid,
             'phone_id': campaign.phone_id,
             'agent_id': campaign.agent_id,
-            'record_count': None,  # Will be populated from Millis.ai
-            'status': None  # Will be populated from Millis.ai
+            'record_count': record_count,  # Use DB value if available
+            'status': status  # Use DB value if available
         }
         campaigns.append(campaign_dict)
         
-        # Collect CIDs for batch fetching
-        if campaign.cid:
+        # Only fetch from Millis if we don't have record_count or status in DB
+        if campaign.cid and (record_count is None or status is None):
             cids_to_fetch.append(campaign.cid)
     
-    # Fetch campaign details from Millis.ai API in batch
+    # Fetch campaign details from Millis.ai API only for campaigns missing data
     if cids_to_fetch:
-        logger.info(f"Fetching record counts for {len(cids_to_fetch)} campaigns from Millis.ai")
+        logger.info(f"Fetching missing data for {len(cids_to_fetch)} campaigns from Millis.ai (out of {len(campaigns)} total)")
         millis_campaigns = get_campaign_details(cids_to_fetch)
         
-        # Enrich campaigns with record counts and status
+        # Enrich campaigns with missing data from Millis.ai
         for campaign_dict in campaigns:
             cid = campaign_dict.get('cid')
             if cid and cid in millis_campaigns:
-                campaign_dict['record_count'] = millis_campaigns[cid].get('record_count', 0)
-                campaign_dict['status'] = millis_campaigns[cid].get('status', 'unknown')
-                logger.debug(f"Campaign {campaign_dict['id']} (cid: {cid}) has {campaign_dict['record_count']} records, status: {campaign_dict['status']}")
-            else:
-                campaign_dict['record_count'] = 0
-                campaign_dict['status'] = 'unknown'
-                logger.debug(f"Campaign {campaign_dict['id']} (cid: {cid}) not found in Millis.ai or has no CID")
+                millis_data = millis_campaigns[cid]
+                # Only update if DB value was null
+                if campaign_dict.get('record_count') is None:
+                    campaign_dict['record_count'] = millis_data.get('record_count', 0)
+                if campaign_dict.get('status') is None:
+                    campaign_dict['status'] = millis_data.get('status', 'unknown')
+                logger.debug(f"Campaign {campaign_dict['id']} (cid: {cid}) enriched from Millis.ai: record_count={campaign_dict.get('record_count')}, status={campaign_dict.get('status')}")
+            elif cid:
+                # Campaign not found in Millis, set defaults if null
+                if campaign_dict.get('record_count') is None:
+                    campaign_dict['record_count'] = 0
+                if campaign_dict.get('status') is None:
+                    campaign_dict['status'] = 'unknown'
+                logger.debug(f"Campaign {campaign_dict['id']} (cid: {cid}) not found in Millis.ai, using defaults")
     else:
-        logger.info("No CIDs to fetch from Millis.ai")
+        logger.info(f"All {len(campaigns)} campaigns have data in DB, skipping Millis.ai fetch")
     
     return campaigns
 
@@ -192,10 +204,11 @@ def create_campaign_service(
 def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Refresh campaign status from Millis.ai API and update database.
+    Uses the faster /info endpoint which only returns essential info.
     
     Process:
     1. Get campaign from database by campaign_id
-    2. Fetch latest status from Millis.ai API using campaign CID
+    2. Fetch latest status from Millis.ai API using /info endpoint
     3. Update campaign status in database
     
     Args:
@@ -223,30 +236,27 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             logger.error(error_msg)
             return False, error_msg, None
         
-        # Fetch latest campaign details from Millis.ai
-        millis_campaigns = get_campaign_details([campaign.cid])
+        # Fetch latest campaign info from Millis.ai using /info endpoint (faster)
+        millis_success, millis_error, millis_info = get_campaign_info(campaign.cid)
         
-        if campaign.cid not in millis_campaigns:
-            error_msg = f"Campaign {campaign.cid} not found in Millis.ai"
+        if not millis_success or not millis_info:
+            error_msg = millis_error or f"Campaign {campaign.cid} not found in Millis.ai"
             logger.warning(error_msg)
             return False, error_msg, None
         
-        millis_data = millis_campaigns[campaign.cid]
-        new_status = millis_data.get('status')
-        new_record_count = millis_data.get('record_count', 0)
+        new_status = millis_info.get('status')
         
         if not new_status:
             error_msg = "Status not found in Millis.ai response"
             logger.error(error_msg)
             return False, error_msg, None
         
-        # Update campaign status and records_count in database
+        # Update campaign status in database (only status, not record_count)
         try:
             campaign.status = new_status
-            campaign.records_count = new_record_count
             db.commit()
             db.refresh(campaign)
-            logger.info(f"Campaign {campaign_id} (cid: {campaign.cid}) status and records_count updated in DB: status={new_status}, records_count={new_record_count}")
+            logger.info(f"Campaign {campaign_id} (cid: {campaign.cid}) status updated in DB: status={new_status}")
         except Exception as e:
             db.rollback()
             logger.error(f"Error updating campaign {campaign_id} in database: {e}")
@@ -258,7 +268,7 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             'cid': campaign.cid,
             'status': new_status,
             'phase_id': campaign.phase_id,
-            'record_count': new_record_count
+            'record_count': campaign.records_count  # Keep existing record_count from DB
         }
         
     except Exception as e:
@@ -270,11 +280,12 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
 def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = None) -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
     """
     Refresh status for all campaigns (optionally filtered by phase_id) from Millis.ai API.
+    Uses the faster /info endpoint which only returns essential info.
     
     Process:
     1. Get all campaigns from database (optionally filtered by phase_id)
-    2. Fetch latest status from Millis.ai API for all campaign CIDs
-    3. Return updated campaign data with new statuses
+    2. Fetch latest status from Millis.ai API using /info endpoint for all campaign CIDs
+    3. Update status in database and return updated campaign data
     
     Args:
         db: Database session
@@ -286,7 +297,7 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
         - error_message: Error message if failed, None if succeeded
         - campaigns_data: List of updated campaign dictionaries if succeeded, None if failed
     """
-    logger.info(f"Refreshing status for all campaigns (phase_id: {phase_id})")
+    logger.info(f"Refreshing status for all campaigns (phase_id: {phase_id}) using /info endpoint")
     
     try:
         # Get campaigns from database
@@ -297,19 +308,17 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
         
         # Collect all CIDs
         cids_to_fetch = []
-        campaigns_map = {}
         
         for campaign in result:
             if campaign.cid:
                 cids_to_fetch.append(campaign.cid)
-                campaigns_map[campaign.cid] = campaign
         
         if not cids_to_fetch:
             logger.info("No campaigns with CIDs found")
             return True, None, []
         
-        # Fetch latest campaign details from Millis.ai
-        millis_campaigns = get_campaign_details(cids_to_fetch)
+        # Fetch latest campaign info from Millis.ai using /info endpoint (faster)
+        millis_campaigns_info = get_campaign_info_batch(cids_to_fetch)
         
         # Build updated campaigns list and update database
         updated_campaigns = []
@@ -323,36 +332,34 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
                 'cid': campaign.cid,
                 'phone_id': campaign.phone_id,
                 'agent_id': campaign.agent_id,
-                'record_count': None,
-                'status': None
+                'record_count': campaign.records_count,  # Keep existing record_count from DB
+                'status': campaign.status  # Will be updated if found in Millis
             }
             
-            if campaign.cid and campaign.cid in millis_campaigns:
-                millis_data = millis_campaigns[campaign.cid]
-                new_status = millis_data.get('status')
-                new_record_count = millis_data.get('record_count', 0)
+            if campaign.cid and campaign.cid in millis_campaigns_info:
+                millis_info = millis_campaigns_info[campaign.cid]
+                new_status = millis_info.get('status')
                 
-                # Update campaign in database
-                try:
-                    campaign.status = new_status
-                    campaign.records_count = new_record_count
-                    campaign_dict['status'] = new_status
-                    campaign_dict['record_count'] = new_record_count
-                except Exception as e:
-                    logger.error(f"Error updating campaign {campaign.id} in database: {e}")
-                    # Use values from Millis.ai even if DB update fails
-                    campaign_dict['status'] = new_status or 'unknown'
-                    campaign_dict['record_count'] = new_record_count or 0
+                if new_status:
+                    # Update campaign status in database
+                    try:
+                        campaign.status = new_status
+                        campaign_dict['status'] = new_status
+                    except Exception as e:
+                        logger.error(f"Error updating campaign {campaign.id} in database: {e}")
+                        # Use value from Millis.ai even if DB update fails
+                        campaign_dict['status'] = new_status
             else:
-                campaign_dict['status'] = 'unknown'
-                campaign_dict['record_count'] = 0
+                # Keep existing status or set to unknown
+                if not campaign_dict.get('status'):
+                    campaign_dict['status'] = 'unknown'
             
             updated_campaigns.append(campaign_dict)
         
         # Commit all database updates
         try:
             db.commit()
-            logger.info(f"Successfully updated {len(updated_campaigns)} campaigns in database")
+            logger.info(f"Successfully updated status for {len(updated_campaigns)} campaigns in database")
         except Exception as e:
             db.rollback()
             logger.error(f"Error committing campaign updates to database: {e}")
