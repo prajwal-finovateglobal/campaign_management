@@ -1110,12 +1110,12 @@ export default function Home() {
                 onViewMetadata={(metadata) => setSelectedMetadata(metadata)}
               />
             </div>
-        </div>
+          </div>
 
         {/* Campaign Management Tab */}
         <div className={activeTab === 'campaign-management' ? '' : 'hidden'}>
           <CampaignManagement selectedClientId={selectedClientId} />
-        </div>
+          </div>
 
         {/* Reports Tab */}
         <div className={activeTab === 'reports' ? '' : 'hidden'}>

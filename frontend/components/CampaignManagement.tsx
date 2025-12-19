@@ -97,7 +97,6 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [settingCid, setSettingCid] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingStatus, setRefreshingStatus] = useState<number | null>(null);
-  const [refreshingAllStatus, setRefreshingAllStatus] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
     show: boolean;
     campaignId: number | null;
@@ -752,7 +751,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
           <div className="mt-4 pt-4 border-t border-[var(--card-border)]">
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[var(--foreground)]">First Time Upload:</span>
+                <span className="text-sm font-medium text-[var(--foreground)]">Manual Upload:</span>
                 <div className="relative group">
                   <button
                     onClick={() => setUploadMetadataEnabled(!uploadMetadataEnabled)}
@@ -768,10 +767,13 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                     </span>
                   </button>
                   {/* Tooltip */}
-                  <div className="absolute left-0 top-full mt-2 w-64 p-2 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-md shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                    <p className="text-xs text-[var(--foreground)]">
+                  <div className="absolute left-0 top-full mt-2 w-72 p-3 bg-[var(--card-bg)] border border-[var(--danger)] rounded-md shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                    <p className="text-xs text-[var(--foreground)] mb-2">
                       <AlertTriangle className="w-4 h-4 text-[var(--danger)] inline mr-1" />
-                      Only use this when uploading data for the first time in Phase 1. In the first phase, there's no existing client data to load from the database.
+                      <strong className="text-[var(--danger)]">Warning:</strong> Enable this to manually upload metadata CSV.
+                    </p>
+                    <p className="text-xs text-[var(--danger)] font-semibold">
+                      ⚠️ This will delete all existing records in data.csv and replace them with the uploaded data.
                     </p>
                   </div>
                 </div>
@@ -901,39 +903,30 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                     alert('Please select a phase first');
                                     return;
                                   }
-                                  setRefreshingAllStatus(true);
+                                  setRefreshing(true);
                                   try {
                                     const response = await api.post(`/campaign/refresh-all-status?phase_id=${selectedPhaseId}`);
-
                                     if (!response.ok) {
                                       const errorData = await response.json();
                                       const errorDetail = errorData.detail || errorData;
                                       alert(errorDetail.message || 'Failed to refresh all statuses');
                                     } else {
                                       const result = await response.json();
-                                      // Update all campaigns with refreshed statuses
-                                      if (result.campaigns) {
-                                        setCampaigns(prevCampaigns => {
-                                          const updatedMap = new Map(result.campaigns.map((c: any) => [c.id, c]));
-                                          return prevCampaigns.map(c => {
-                                            const updated = updatedMap.get(c.id);
-                                            return updated ? { ...c, status: updated.status } : c;
-                                          });
-                                        });
-                                      }
+                                      // Update campaigns with refreshed statuses
+                                      setCampaigns(result.campaigns || []);
                                     }
                                   } catch (error: any) {
                                     console.error('Error refreshing all statuses:', error);
                                     alert(`Error: ${error.message || 'Failed to refresh all statuses'}`);
                                   } finally {
-                                    setRefreshingAllStatus(false);
+                                    setRefreshing(false);
                                   }
                                 }}
-                                disabled={refreshingAllStatus || !selectedPhaseId}
-                                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors disabled:opacity-50"
-                                title="Refresh all campaign statuses from Millis.ai"
+                                disabled={refreshing || !selectedPhaseId}
+                                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Refresh all campaign statuses"
                               >
-                                <RefreshCw className={`w-3 h-3 text-[var(--secondary)] ${refreshingAllStatus ? 'animate-spin' : ''}`} />
+                                <RefreshCw className={`w-3 h-3 text-[var(--secondary)] ${refreshing ? 'animate-spin' : ''}`} />
                               </button>
                             </div>
                           </th>

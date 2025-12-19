@@ -13,7 +13,7 @@ logger = loguru.logger.bind(service="millis_api")
 def get_campaign_details(cids: List[str]) -> Dict[str, Dict[str, Any]]:
     """
     Fetch campaign details from Millis.ai API for given campaign IDs.
-    Uses individual campaign endpoint for better performance.
+    Uses individual campaign endpoint /campaigns/{cid} for each CID.
     
     Args:
         cids: List of campaign IDs (cid) to fetch details for
@@ -39,50 +39,46 @@ def get_campaign_details(cids: List[str]) -> Dict[str, Dict[str, Any]]:
         logger.info("No CIDs provided, returning empty dict")
         return {}
     
-    try:
-        headers = {
-            "authorization": MILLIS_API_KEY
-        }
-        
-        logger.info(f"Fetching campaign details for {len(cids)} CIDs from Millis.ai using individual endpoints")
-        cid_to_campaign = {}
-        
-        # Fetch each campaign individually using /campaigns/{cid} endpoint
-        for cid in cids:
-            try:
-                url = f"{MILLIS_API_BASE_URL}/campaigns/{cid}"
-                response = requests.get(url, headers=headers, timeout=30)
+    cid_to_campaign = {}
+    headers = {
+        "authorization": MILLIS_API_KEY
+    }
+    
+    logger.info(f"Fetching campaign details for {len(cids)} CIDs from Millis.ai using individual endpoints")
+    
+    # Fetch each campaign individually using /campaigns/{cid} endpoint
+    for cid in cids:
+        try:
+            url = f"{MILLIS_API_BASE_URL}/campaigns/{cid}"
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                campaign = response.json()
+                # Count records
+                records = campaign.get("records", [])
+                record_count = len(records) if records else 0
                 
-                if response.status_code == 200:
-                    campaign = response.json()
-                    # Count records
-                    records = campaign.get("records", [])
-                    record_count = len(records) if records else 0
-                    
-                    # Extract status directly from API response
-                    status = campaign.get("status")
-                    
-                    cid_to_campaign[cid] = {
-                        **campaign,
-                        "record_count": record_count,
-                        "status": status
-                    }
-                    logger.debug(f"Found campaign {cid} with {record_count} records, status: {status}")
-                else:
-                    logger.warning(f"Failed to fetch campaign {cid}: status {response.status_code}")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching campaign {cid} from Millis.ai: {e}")
-                continue
-            except Exception as e:
-                logger.error(f"Unexpected error fetching campaign {cid}: {e}")
-                continue
-        
-        logger.info(f"Successfully fetched {len(cid_to_campaign)} campaigns out of {len(cids)} requested")
-        return cid_to_campaign
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in get_campaign_details: {e}")
-        return {}
+                # Extract status directly from API response
+                status = campaign.get("status")
+                
+                cid_to_campaign[cid] = {
+                    **campaign,
+                    "record_count": record_count,
+                    "status": status
+                }
+                logger.debug(f"Fetched campaign {cid} with {record_count} records, status: {status}")
+            else:
+                logger.warning(f"Failed to fetch campaign {cid}: status {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching campaign {cid} from Millis.ai: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"Unexpected error fetching campaign {cid}: {e}")
+            continue
+    
+    logger.info(f"Successfully fetched {len(cid_to_campaign)} campaigns out of {len(cids)} requested")
+    return cid_to_campaign
 
 
 def get_campaign_record_count(cid: str) -> Optional[int]:
@@ -497,71 +493,6 @@ def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]
         error_msg = f"Unexpected error in set_caller: {e}"
         logger.error(error_msg)
         return False, error_msg
-
-
-def get_campaign_info_batch(cids: List[str]) -> Dict[str, Dict[str, Any]]:
-    """
-    Fetch campaign info (status only) from Millis.ai API for multiple campaign IDs.
-    Uses the faster /info endpoint which only returns essential info.
-    
-    Args:
-        cids: List of campaign IDs (cid) to fetch info for
-    
-    Returns:
-        Dictionary mapping cid to campaign info with status
-        Format: {
-            "cid1": {
-                "id": "...",
-                "name": "...",
-                "status": "finished",
-                "created_at": 123,
-                "caller": "...",
-                ...
-            },
-            ...
-        }
-    """
-    if not MILLIS_API_KEY:
-        logger.warning("MILLIS_API_KEY not configured")
-        return {}
-    
-    if not cids:
-        logger.info("No CIDs provided, returning empty dict")
-        return {}
-    
-    try:
-        headers = {
-            "authorization": MILLIS_API_KEY
-        }
-        
-        logger.info(f"Fetching campaign info for {len(cids)} CIDs from Millis.ai using /info endpoint")
-        cid_to_info = {}
-        
-        # Fetch each campaign info individually using /campaigns/{cid}/info endpoint
-        for cid in cids:
-            try:
-                url = f"{MILLIS_API_BASE_URL}/campaigns/{cid}/info"
-                response = requests.get(url, headers=headers, timeout=30)
-                
-                if response.status_code == 200:
-                    campaign_info = response.json()
-                    cid_to_info[cid] = campaign_info
-                    logger.debug(f"Fetched info for campaign {cid}: status={campaign_info.get('status')}")
-                else:
-                    logger.warning(f"Failed to fetch campaign info {cid}: status {response.status_code}")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching campaign info {cid} from Millis.ai: {e}")
-                continue
-            except Exception as e:
-                logger.error(f"Unexpected error fetching campaign info {cid}: {e}")
-                continue
-        
-        logger.info(f"Successfully fetched info for {len(cid_to_info)} campaigns out of {len(cids)} requested")
-        return cid_to_info
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in get_campaign_info_batch: {e}")
-        return {}
 
 
 def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
