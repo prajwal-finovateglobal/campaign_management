@@ -421,6 +421,219 @@ def cut_ccd(contact_values: List[str]) -> Tuple[bool, Optional[str], Optional[in
         return False, error_msg, None
 
 
+def delete_csv_records(records: List[Dict[str, Any]]) -> Tuple[bool, Optional[str], Optional[int]]:
+    """
+    Delete specific records from data.csv based on multiple identifying fields.
+    Uses phone or contact_to as primary identifiers.
+    
+    Args:
+        records: List of record dictionaries to delete (each containing identifying fields)
+    
+    Returns:
+        Tuple of (success, message, rows_deleted)
+        - success: Whether operation succeeded
+        - message: Success or error message
+        - rows_deleted: Number of rows deleted, None if error
+    """
+    try:
+        if not DATA_CSV_PATH.exists():
+            return False, "data.csv file does not exist", None
+        
+        # Check if CSV is empty
+        if is_csv_empty():
+            return True, "CSV file is already empty. No rows to delete.", 0
+        
+        if not records:
+            return False, "No records provided for deletion", None
+        
+        # Read all data from CSV
+        success, error_msg, csv_data = read_csv_data()
+        if not success or csv_data is None:
+            error_msg = error_msg or "Failed to read data from CSV"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        if not csv_data:
+            return True, "CSV file is empty. No rows to delete.", 0
+        
+        # Create a set of identifiers from records to delete
+        # Use phone or contact_to as primary identifiers
+        identifiers_to_delete = set()
+        for record in records:
+            phone = str(record.get('phone', '')).strip() if record.get('phone') else None
+            contact_to = str(record.get('contact_to', '')).strip() if record.get('contact_to') else None
+            
+            if phone:
+                identifiers_to_delete.add(('phone', phone))
+            if contact_to:
+                identifiers_to_delete.add(('contact_to', contact_to))
+        
+        if not identifiers_to_delete:
+            return False, "No valid identifiers found in records to delete", None
+        
+        # Filter out rows that match any identifier
+        rows_before = len(csv_data)
+        filtered_data = []
+        rows_deleted = 0
+        
+        for row in csv_data:
+            should_delete = False
+            
+            # Check if this row matches any identifier
+            row_phone = str(row.get('phone', '')).strip() if row.get('phone') else ''
+            row_contact_to = str(row.get('contact_to', '')).strip() if row.get('contact_to') else ''
+            
+            for id_type, id_value in identifiers_to_delete:
+                if id_type == 'phone' and row_phone and row_phone == id_value:
+                    should_delete = True
+                    break
+                elif id_type == 'contact_to' and row_contact_to and row_contact_to == id_value:
+                    should_delete = True
+                    break
+            
+            if not should_delete:
+                filtered_data.append(row)
+            else:
+                rows_deleted += 1
+        
+        if rows_deleted == 0:
+            return True, f"No matching rows found to delete. {rows_before} rows remain.", 0
+        
+        # Get existing columns to preserve structure
+        existing_columns = get_existing_columns()
+        if not existing_columns:
+            # If no columns, get from first row
+            existing_columns = list(filtered_data[0].keys()) if filtered_data else []
+        
+        # Write filtered data back to CSV
+        DATA_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DATA_CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+            if existing_columns:
+                writer = csv.DictWriter(f, fieldnames=existing_columns)
+                writer.writeheader()
+                for row in filtered_data:
+                    # Ensure all columns exist in row
+                    complete_row = {col: row.get(col, '') for col in existing_columns}
+                    writer.writerow(complete_row)
+        
+        logger.info(f"Successfully deleted {rows_deleted} records from CSV. {len(filtered_data)} rows remain.")
+        return True, f"Successfully deleted {rows_deleted} record(s). {len(filtered_data)} rows remain in CSV.", rows_deleted
+        
+    except Exception as e:
+        error_msg = f"Error deleting records from CSV: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg, None
+
+
+def update_csv_records(records: List[Dict[str, Any]]) -> Tuple[bool, Optional[str], Optional[int]]:
+    """
+    Update specific records in data.csv based on identifying fields.
+    Uses phone or contact_to as primary identifiers to match records.
+    
+    Args:
+        records: List of dicts with 'original' and 'updated' record data
+    
+    Returns:
+        Tuple of (success, message, rows_updated)
+        - success: Whether operation succeeded
+        - message: Success or error message
+        - rows_updated: Number of rows updated, None if error
+    """
+    try:
+        if not DATA_CSV_PATH.exists():
+            return False, "data.csv file does not exist", None
+        
+        # Check if CSV is empty
+        if is_csv_empty():
+            return False, "CSV file is empty. No rows to update.", None
+        
+        if not records:
+            return False, "No records provided for update", None
+        
+        # Read all data from CSV
+        success, error_msg, csv_data = read_csv_data()
+        if not success or csv_data is None:
+            error_msg = error_msg or "Failed to read data from CSV"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        if not csv_data:
+            return False, "CSV file is empty. No rows to update.", None
+        
+        # Create a map of records to update
+        # Key: tuple of (id_type, id_value), Value: updated record data
+        updates_map = {}
+        for record_pair in records:
+            original = record_pair.get('original', {})
+            updated = record_pair.get('updated', {})
+            
+            if not original or not updated:
+                continue
+            
+            # Use phone or contact_to as identifier
+            phone = str(original.get('phone', '')).strip() if original.get('phone') else None
+            contact_to = str(original.get('contact_to', '')).strip() if original.get('contact_to') else None
+            
+            if phone:
+                updates_map[('phone', phone)] = updated
+            elif contact_to:
+                updates_map[('contact_to', contact_to)] = updated
+        
+        if not updates_map:
+            return False, "No valid identifiers found in records to update", None
+        
+        # Update matching rows
+        rows_updated = 0
+        updated_data = []
+        
+        for row in csv_data:
+            row_phone = str(row.get('phone', '')).strip() if row.get('phone') else ''
+            row_contact_to = str(row.get('contact_to', '')).strip() if row.get('contact_to') else ''
+            
+            # Check if this row should be updated
+            updated_record = None
+            if row_phone and ('phone', row_phone) in updates_map:
+                updated_record = updates_map[('phone', row_phone)]
+            elif row_contact_to and ('contact_to', row_contact_to) in updates_map:
+                updated_record = updates_map[('contact_to', row_contact_to)]
+            
+            if updated_record:
+                # Merge the updated values with existing row
+                updated_row = {**row, **updated_record}
+                updated_data.append(updated_row)
+                rows_updated += 1
+            else:
+                updated_data.append(row)
+        
+        if rows_updated == 0:
+            return True, "No matching rows found to update.", 0
+        
+        # Get existing columns to preserve structure
+        existing_columns = get_existing_columns()
+        if not existing_columns:
+            # If no columns, get from first row
+            existing_columns = list(updated_data[0].keys()) if updated_data else []
+        
+        # Write updated data back to CSV
+        DATA_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DATA_CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+            if existing_columns:
+                writer = csv.DictWriter(f, fieldnames=existing_columns)
+                writer.writeheader()
+                for row in updated_data:
+                    # Ensure all columns exist in row
+                    complete_row = {col: row.get(col, '') for col in existing_columns}
+                    writer.writerow(complete_row)
+        
+        logger.info(f"Successfully updated {rows_updated} records in CSV.")
+        return True, f"Successfully updated {rows_updated} record(s) in CSV.", rows_updated
+        
+    except Exception as e:
+        error_msg = f"Error updating records in CSV: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg, None
+
+
 def get_unique_campaign_ids() -> Tuple[bool, Optional[str], Optional[List[int]]]:
     """
     Get all unique campaign_id values from data.csv.

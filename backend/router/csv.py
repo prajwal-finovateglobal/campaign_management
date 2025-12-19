@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from service.csv_service import append_to_csv, get_existing_columns, clear_csv, read_csv_data, set_campaign_id, get_unique_campaign_ids, format_phone_numbers, upload_csv_file, cut_ccd
-from schema.csv import LoadDataRequest, LoadDataResponse, DeletePCDResponse, GetCSVDataResponse, SetCampaignIdRequest, SetCampaignIdResponse, GetCampaignIdsResponse, FormatPhoneNumbersResponse, UploadCSVResponse, CutCCDRequest, CutCCDResponse
+from service.csv_service import append_to_csv, get_existing_columns, clear_csv, read_csv_data, set_campaign_id, get_unique_campaign_ids, format_phone_numbers, upload_csv_file, cut_ccd, delete_csv_records, update_csv_records
+from schema.csv import LoadDataRequest, LoadDataResponse, DeletePCDResponse, GetCSVDataResponse, SetCampaignIdRequest, SetCampaignIdResponse, GetCampaignIdsResponse, FormatPhoneNumbersResponse, UploadCSVResponse, CutCCDRequest, CutCCDResponse, DeleteCSVRecordsRequest, DeleteCSVRecordsResponse, UpdateCSVRecordsRequest, UpdateCSVRecordsResponse, AddCSVRecordsRequest, AddCSVRecordsResponse
 import loguru
 
 router = APIRouter()
@@ -367,6 +367,173 @@ def cut_ccd_endpoint(request: CutCCDRequest):
                 "message": f"Unexpected error: {str(e)}",
                 "rows_deleted": None,
                 "tone": "danger"
+            }
+        )
+
+
+@router.post("/delete_csv_records", response_model=DeleteCSVRecordsResponse)
+def delete_csv_records_endpoint(request: DeleteCSVRecordsRequest):
+    """
+    Delete specific records from data.csv based on identifying fields (phone, contact_to).
+    
+    WARNING: This will permanently delete matching records from data.csv.
+    
+    Args:
+        request: DeleteCSVRecordsRequest with list of records to delete
+    
+    Returns:
+        DeleteCSVRecordsResponse with success status, message, and rows deleted
+    """
+    logger.info(f"Deleting {len(request.records)} records from data.csv")
+    
+    try:
+        if not request.records:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "message": "No records provided",
+                    "rows_deleted": None
+                }
+            )
+        
+        success, message, rows_deleted = delete_csv_records(request.records)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "success": False,
+                    "message": message,
+                    "rows_deleted": None
+                }
+            )
+        
+        return DeleteCSVRecordsResponse(
+            success=True,
+            message=message,
+            rows_deleted=rows_deleted
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in delete_csv_records: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "message": f"Unexpected error: {str(e)}",
+                "rows_deleted": None
+            }
+        )
+
+
+@router.post("/update_csv_records", response_model=UpdateCSVRecordsResponse)
+def update_csv_records_endpoint(request: UpdateCSVRecordsRequest):
+    """
+    Update specific records in data.csv based on identifying fields (phone, contact_to).
+    
+    Args:
+        request: UpdateCSVRecordsRequest with list of records to update (each with 'original' and 'updated' dicts)
+    
+    Returns:
+        UpdateCSVRecordsResponse with success status, message, and rows updated
+    """
+    logger.info(f"Updating {len(request.records)} records in data.csv")
+    
+    try:
+        if not request.records:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "message": "No records provided",
+                    "rows_updated": None
+                }
+            )
+        
+        success, message, rows_updated = update_csv_records(request.records)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "success": False,
+                    "message": message,
+                    "rows_updated": None
+                }
+            )
+        
+        return UpdateCSVRecordsResponse(
+            success=True,
+            message=message,
+            rows_updated=rows_updated
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in update_csv_records: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "message": f"Unexpected error: {str(e)}",
+                "rows_updated": None
+            }
+        )
+
+
+@router.post("/add_csv_records", response_model=AddCSVRecordsResponse)
+def add_csv_records_endpoint(request: AddCSVRecordsRequest):
+    """
+    Add new records to data.csv.
+    
+    Args:
+        request: AddCSVRecordsRequest with list of new records to add
+    
+    Returns:
+        AddCSVRecordsResponse with success status, message, and rows added
+    """
+    logger.info(f"Adding {len(request.records)} new records to data.csv")
+    
+    try:
+        if not request.records:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "message": "No records provided",
+                    "rows_added": None
+                }
+            )
+        
+        success, error_msg = append_to_csv(request.records)
+        
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "message": error_msg or "Failed to add records",
+                    "rows_added": None
+                }
+            )
+        
+        return AddCSVRecordsResponse(
+            success=True,
+            message=f"Successfully added {len(request.records)} new record(s) to CSV.",
+            rows_added=len(request.records)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in add_csv_records: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "message": f"Unexpected error: {str(e)}",
+                "rows_added": None
             }
         )
 

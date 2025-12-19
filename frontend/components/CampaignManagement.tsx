@@ -138,6 +138,14 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // View/Edit mode states for Current CD
+  const [cdViewMode, setCdViewMode] = useState<'view' | 'edit'>('view');
+  const [selectedCdRecords, setSelectedCdRecords] = useState<Set<number>>(new Set());
+  const [deletingCdRecords, setDeletingCdRecords] = useState(false);
+  const [editedRecords, setEditedRecords] = useState<Map<number, any>>(new Map());
+  const [savingChanges, setSavingChanges] = useState(false);
+  const [newRecords, setNewRecords] = useState<any[]>([]); // Array of new records being added
+
 
   // Fetch phases when client is selected
   useEffect(() => {
@@ -1523,8 +1531,182 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       {/* Search Bar */}
       {csvData.length > 0 && availableSearchColumns.length > 0 && (
         <div className="mb-4 p-4 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm">
-          <div className="flex items-center gap-3">
-            {/* Upload Records Button - Extreme Left */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* View/Edit Mode Dropdown - Extreme Left */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-[var(--foreground)] whitespace-nowrap">Mode:</span>
+              <div className="relative">
+                <select
+                  value={cdViewMode}
+                  onChange={(e) => {
+                    const newMode = e.target.value as 'view' | 'edit';
+                    if (newMode === 'view' && (editedRecords.size > 0 || newRecords.length > 0)) {
+                      if (!confirm('You have unsaved changes. Are you sure you want to switch to view mode? Changes will be lost.')) {
+                        return;
+                      }
+                    }
+                    setCdViewMode(newMode);
+                    setSelectedCdRecords(new Set()); // Clear selection when switching modes
+                    setEditedRecords(new Map()); // Clear edited records when switching modes
+                    setNewRecords([]); // Clear new records when switching modes
+                  }}
+                  className="px-3 py-2 pr-8 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] appearance-none"
+                >
+                  <option value="view">View Only</option>
+                  <option value="edit">Edit</option>
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--secondary)] pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Add Record Button - Only show in edit mode */}
+            {cdViewMode === 'edit' && csvData.length > 0 && (
+              <button
+                onClick={() => {
+                  // Create a new empty record with same schema as existing records
+                  const emptyRecord: any = {};
+                  if (csvData.length > 0) {
+                    Object.keys(csvData[0]).forEach(key => {
+                      emptyRecord[key] = '';
+                    });
+                  }
+                  setNewRecords([...newRecords, emptyRecord]);
+                }}
+                className="px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors text-sm font-medium flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Add Record
+              </button>
+            )}
+
+            {/* Save Changes Button - Only show in edit mode when there are changes */}
+            {cdViewMode === 'edit' && (editedRecords.size > 0 || newRecords.length > 0) && (
+              <button
+                onClick={async () => {
+                  setSavingChanges(true);
+                  try {
+                    // Prepare the records to update
+                    const recordsToUpdate = [];
+                    for (const [index, changes] of editedRecords.entries()) {
+                      const originalRecord = filteredData[index];
+                      const updatedRecord = { ...originalRecord, ...changes };
+                      recordsToUpdate.push({
+                        original: originalRecord,
+                        updated: updatedRecord
+                      });
+                    }
+                    
+                    // Send update request if there are edited records
+                    if (recordsToUpdate.length > 0) {
+                      const updateResponse = await api.post('/update_csv_records', {
+                        records: recordsToUpdate
+                      });
+
+                      if (!updateResponse.ok) {
+                        const errorData = await updateResponse.json();
+                        const errorDetail = errorData.detail || errorData;
+                        throw new Error(errorDetail.message || 'Failed to update records');
+                      }
+                    }
+
+                    // Send add request if there are new records
+                    if (newRecords.length > 0) {
+                      const addResponse = await api.post('/add_csv_records', {
+                        records: newRecords
+                      });
+
+                      if (!addResponse.ok) {
+                        const errorData = await addResponse.json();
+                        const errorDetail = errorData.detail || errorData;
+                        throw new Error(errorDetail.message || 'Failed to add new records');
+                      }
+                    }
+
+                    alert(`Successfully saved ${recordsToUpdate.length} update(s) and ${newRecords.length} new record(s)!`);
+                    
+                    // Clear edited records, new records, and refresh data
+                    setEditedRecords(new Map());
+                    setNewRecords([]);
+                    await handleShowCurrentCD();
+                  } catch (error: any) {
+                    console.error('Error saving changes:', error);
+                    alert(`Error: ${error.message || 'Failed to save changes'}`);
+                  } finally {
+                    setSavingChanges(false);
+                  }
+                }}
+                disabled={savingChanges}
+                className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {savingChanges ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Save ({editedRecords.size} edit{editedRecords.size !== 1 ? 's' : ''}, {newRecords.length} new)
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Delete Selected Button - Only show in edit mode */}
+            {cdViewMode === 'edit' && selectedCdRecords.size > 0 && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`Are you sure you want to delete ${selectedCdRecords.size} selected record(s)?`)) {
+                    return;
+                  }
+                  setDeletingCdRecords(true);
+                  try {
+                    // Get the selected records
+                    const recordsToDelete = filteredData.filter((_, index) => selectedCdRecords.has(index));
+                    
+                    // Send delete request with phone numbers or identifiers
+                    const response = await api.post('/delete_csv_records', {
+                      records: recordsToDelete
+                    });
+
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      const errorDetail = errorData.detail || errorData;
+                      alert(errorDetail.message || 'Failed to delete records');
+                    } else {
+                      const result = await response.json();
+                      alert(result.message || 'Records deleted successfully');
+                      
+                      // Refresh data
+                      await handleShowCurrentCD();
+                      setSelectedCdRecords(new Set());
+                      setEditedRecords(new Map());
+                    }
+                  } catch (error: any) {
+                    console.error('Error deleting records:', error);
+                    alert(`Error: ${error.message || 'Failed to delete records'}`);
+                  } finally {
+                    setDeletingCdRecords(false);
+                  }
+                }}
+                disabled={deletingCdRecords}
+                className="px-4 py-2 bg-[var(--danger)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {deletingCdRecords ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete Selected ({selectedCdRecords.size})
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Upload Records Button */}
             {selectedPhaseId && (
               <button
                 onClick={() => {
@@ -1620,12 +1802,53 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       {csvData.length > 0 && (
         <div>
           <DataTable
-            data={filteredData}
+            data={[...filteredData, ...newRecords]}
             loading={loading}
             selectedColumns={selectedColumns}
             onPlayRecording={(url) => setSelectedRecording(url)}
             onViewChat={(chat) => setSelectedChat(chat)}
             onViewMetadata={(metadata) => setSelectedChat(metadata)}
+            editMode={cdViewMode === 'edit'}
+            selectedRecords={selectedCdRecords}
+            onToggleRecord={(index) => {
+              const newSelected = new Set(selectedCdRecords);
+              if (newSelected.has(index)) {
+                newSelected.delete(index);
+              } else {
+                newSelected.add(index);
+              }
+              setSelectedCdRecords(newSelected);
+            }}
+            onToggleAll={() => {
+              if (selectedCdRecords.size === filteredData.length) {
+                setSelectedCdRecords(new Set());
+              } else {
+                setSelectedCdRecords(new Set(filteredData.map((_, idx) => idx)));
+              }
+            }}
+            editedRecords={editedRecords}
+            onCellEdit={(rowIndex, column, value) => {
+              // Check if this is a new record (index >= filteredData.length)
+              if (rowIndex >= filteredData.length) {
+                // Editing a new record
+                const newRecordIndex = rowIndex - filteredData.length;
+                const updatedNewRecords = [...newRecords];
+                updatedNewRecords[newRecordIndex] = {
+                  ...updatedNewRecords[newRecordIndex],
+                  [column]: value
+                };
+                setNewRecords(updatedNewRecords);
+              } else {
+                // Editing an existing record
+                const newEditedRecords = new Map(editedRecords);
+                const existingChanges = newEditedRecords.get(rowIndex) || {};
+                newEditedRecords.set(rowIndex, {
+                  ...existingChanges,
+                  [column]: value
+                });
+                setEditedRecords(newEditedRecords);
+              }
+            }}
           />
         </div>
       )}

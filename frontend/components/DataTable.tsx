@@ -29,6 +29,12 @@ interface DataTableProps {
   onPlayRecording: (url: string) => void;
   onViewChat: (chat: any) => void;
   onViewMetadata: (metadata: any) => void;
+  editMode?: boolean;
+  selectedRecords?: Set<number>;
+  onToggleRecord?: (index: number) => void;
+  onToggleAll?: () => void;
+  editedRecords?: Map<number, any>;
+  onCellEdit?: (rowIndex: number, column: string, value: any) => void;
 }
 
 export function DataTable({
@@ -39,6 +45,12 @@ export function DataTable({
   onPlayRecording,
   onViewChat,
   onViewMetadata,
+  editMode = false,
+  selectedRecords = new Set(),
+  onToggleRecord,
+  onToggleAll,
+  editedRecords = new Map(),
+  onCellEdit,
 }: DataTableProps) {
   const [sortConfig, setSortConfig] = useState<{
     key: string;
@@ -183,6 +195,17 @@ export function DataTable({
         <table className="w-full">
           <thead>
             <tr className="bg-[var(--table-header-bg)] border-b border-[var(--card-border)]">
+              {/* Checkbox column in edit mode */}
+              {editMode && (
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--foreground)] w-12">
+                  <input
+                    type="checkbox"
+                    checked={selectedRecords.size === sortedData.length && sortedData.length > 0}
+                    onChange={onToggleAll}
+                    className="w-4 h-4 rounded border-[var(--input-border)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
+                  />
+                </th>
+              )}
               {visibleColumns.map((column) => (
                 <th
                   key={column}
@@ -207,8 +230,21 @@ export function DataTable({
             {sortedData.map((row, idx) => (
               <tr
                 key={row.id || idx}
-                className="hover:bg-[var(--table-row-hover)] transition-colors"
+                className={`hover:bg-[var(--table-row-hover)] transition-colors ${
+                  editMode && selectedRecords.has(idx) ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                }`}
               >
+                {/* Checkbox cell in edit mode */}
+                {editMode && (
+                  <td className="px-4 py-3 w-12">
+                    <input
+                      type="checkbox"
+                      checked={selectedRecords.has(idx)}
+                      onChange={() => onToggleRecord?.(idx)}
+                      className="w-4 h-4 rounded border-[var(--input-border)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
+                    />
+                  </td>
+                )}
                 {visibleColumns.map((column) => {
                   // For recording column, show play button if valid URL
                   if (column === 'recording') {
@@ -348,12 +384,29 @@ export function DataTable({
                     );
                   }
 
+                  // Get the current value (either edited or original)
+                  const originalValue = (row as any)[column];
+                  const editedRow = editedRecords.get(idx);
+                  const currentValue = editedRow && editedRow.hasOwnProperty(column) 
+                    ? editedRow[column] 
+                    : originalValue;
+                  const isEdited = editedRow && editedRow.hasOwnProperty(column);
+
                   return (
                     <td
                       key={column}
-                      className="px-4 py-3 text-sm text-[var(--foreground)]"
+                      className={`px-4 py-3 text-sm ${isEdited ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}
                     >
-                      {formatCellValue((row as any)[column])}
+                      {editMode ? (
+                        <input
+                          type="text"
+                          value={currentValue !== null && currentValue !== undefined ? String(currentValue) : ''}
+                          onChange={(e) => onCellEdit?.(idx, column, e.target.value)}
+                          className="w-full px-2 py-1 text-sm border border-[var(--input-border)] rounded bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                        />
+                      ) : (
+                        <span className="text-[var(--foreground)]">{formatCellValue(currentValue)}</span>
+                      )}
                     </td>
                   );
                 })}

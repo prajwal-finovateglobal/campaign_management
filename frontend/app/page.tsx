@@ -11,7 +11,7 @@ import { CSVPreviewModal } from '@/components/CSVPreviewModal';
 import { CampaignManagement } from '@/components/CampaignManagement';
 import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
-import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2 } from 'lucide-react';
+import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2 } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
 
 interface DataLog {
@@ -62,6 +62,14 @@ export default function Home() {
   const [showCSVPreview, setShowCSVPreview] = useState(false);
   const [ccdCurrentPage, setCcdCurrentPage] = useState<number>(1);
   const [activeTab, setActiveTab] = useState<'data-management' | 'campaign-management' | 'reports' | 'disposition-tree'>('data-management');
+  
+  // View/Edit mode states for CCD modal
+  const [ccdViewMode, setCcdViewMode] = useState<'view' | 'edit'>('view');
+  const [selectedCcdRecords, setSelectedCcdRecords] = useState<Set<number>>(new Set());
+  const [deletingCcdRecords, setDeletingCcdRecords] = useState(false);
+  const [editedCcdRecords, setEditedCcdRecords] = useState<Map<number, any>>(new Map());
+  const [savingCcdChanges, setSavingCcdChanges] = useState(false);
+  const [newCcdRecords, setNewCcdRecords] = useState<any[]>([]);
   const [searchColumn, setSearchColumn] = useState<string>('');
   const [searchInput, setSearchInput] = useState<string>('');
   
@@ -1191,9 +1199,18 @@ export default function Home() {
               </h2>
               <button
                 onClick={() => {
+                  if (editedCcdRecords.size > 0 || newCcdRecords.length > 0) {
+                    if (!confirm('You have unsaved changes. Are you sure you want to close? Changes will be lost.')) {
+                      return;
+                    }
+                  }
                   setShowCCDModal(false);
                   setCcdData([]);
                   setCcdCurrentPage(1);
+                  setCcdViewMode('view');
+                  setSelectedCcdRecords(new Set());
+                  setEditedCcdRecords(new Map());
+                  setNewCcdRecords([]);
                 }}
                 className="p-1 rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
               >
@@ -1202,13 +1219,188 @@ export default function Home() {
             </div>
 
             {/* Controls */}
-            <div className="p-4 border-b border-[var(--card-border)] flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
+            <div className="p-4 border-b border-[var(--card-border)] flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4">
+                {/* View/Edit Mode Dropdown */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-[var(--foreground)] whitespace-nowrap">Mode:</span>
+                  <div className="relative">
+                    <select
+                      value={ccdViewMode}
+                      onChange={(e) => {
+                        const newMode = e.target.value as 'view' | 'edit';
+                        if (newMode === 'view' && (editedCcdRecords.size > 0 || newCcdRecords.length > 0)) {
+                          if (!confirm('You have unsaved changes. Are you sure you want to switch to view mode? Changes will be lost.')) {
+                            return;
+                          }
+                        }
+                        setCcdViewMode(newMode);
+                        setSelectedCcdRecords(new Set());
+                        setEditedCcdRecords(new Map());
+                        setNewCcdRecords([]);
+                      }}
+                      className="px-3 py-2 pr-8 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] appearance-none"
+                    >
+                      <option value="view">View Only</option>
+                      <option value="edit">Edit</option>
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--secondary)] pointer-events-none" />
+                  </div>
+                </div>
+
                 <span className="text-sm font-medium text-[var(--foreground)]">
-                  Total Records: <span className="font-bold">{ccdData.length}</span>
+                  Total Records: <span className="font-bold">{ccdData.length + newCcdRecords.length}</span>
                 </span>
+
+                {/* Add Record Button - Only show in edit mode */}
+                {ccdViewMode === 'edit' && ccdData.length > 0 && (
+                  <button
+                    onClick={() => {
+                      // Create a new empty record with same schema as existing records
+                      const emptyRecord: any = {};
+                      if (ccdData.length > 0) {
+                        Object.keys(ccdData[0]).forEach(key => {
+                          emptyRecord[key] = '';
+                        });
+                      }
+                      setNewCcdRecords([...newCcdRecords, emptyRecord]);
+                    }}
+                    className="px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors text-sm font-medium flex items-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Add Record
+                  </button>
+                )}
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Save Changes Button - Only show in edit mode when there are changes */}
+                {ccdViewMode === 'edit' && (editedCcdRecords.size > 0 || newCcdRecords.length > 0) && (
+                  <button
+                    onClick={async () => {
+                      setSavingCcdChanges(true);
+                      try {
+                        const currentPageData = ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit);
+                        const recordsToUpdate = [];
+                        for (const [index, changes] of editedCcdRecords.entries()) {
+                          const originalRecord = currentPageData[index];
+                          const updatedRecord = { ...originalRecord, ...changes };
+                          recordsToUpdate.push({
+                            original: originalRecord,
+                            updated: updatedRecord
+                          });
+                        }
+                        
+                        // Send update request if there are edited records
+                        if (recordsToUpdate.length > 0) {
+                          const updateResponse = await api.post('/update_csv_records', {
+                            records: recordsToUpdate
+                          });
+
+                          if (!updateResponse.ok) {
+                            const errorData = await updateResponse.json();
+                            const errorDetail = errorData.detail || errorData;
+                            throw new Error(errorDetail.message || 'Failed to update records');
+                          }
+                        }
+
+                        // Send add request if there are new records
+                        if (newCcdRecords.length > 0) {
+                          const addResponse = await api.post('/add_csv_records', {
+                            records: newCcdRecords
+                          });
+
+                          if (!addResponse.ok) {
+                            const errorData = await addResponse.json();
+                            const errorDetail = errorData.detail || errorData;
+                            throw new Error(errorDetail.message || 'Failed to add new records');
+                          }
+                        }
+
+                        alert(`Successfully saved ${recordsToUpdate.length} update(s) and ${newCcdRecords.length} new record(s)!`);
+                        
+                        // Clear edited records, new records, and refresh data
+                        setEditedCcdRecords(new Map());
+                        setNewCcdRecords([]);
+                        await handleShowCCD();
+                      } catch (error: any) {
+                        console.error('Error saving changes:', error);
+                        alert(`Error: ${error.message || 'Failed to save changes'}`);
+                      } finally {
+                        setSavingCcdChanges(false);
+                      }
+                    }}
+                    disabled={savingCcdChanges}
+                    className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {savingCcdChanges ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        Save ({editedCcdRecords.size} edit{editedCcdRecords.size !== 1 ? 's' : ''}, {newCcdRecords.length} new)
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Delete Selected Button - Only show in edit mode */}
+                {ccdViewMode === 'edit' && selectedCcdRecords.size > 0 && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Are you sure you want to delete ${selectedCcdRecords.size} selected record(s) from CCD?`)) {
+                        return;
+                      }
+                      setDeletingCcdRecords(true);
+                      try {
+                        const currentPageData = ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit);
+                        const recordsToDelete = currentPageData.filter((_, index) => selectedCcdRecords.has(index));
+                        
+                        const response = await api.post('/delete_csv_records', {
+                          records: recordsToDelete
+                        });
+
+                        if (!response.ok) {
+                          const errorData = await response.json();
+                          const errorDetail = errorData.detail || errorData;
+                          alert(errorDetail.message || 'Failed to delete records');
+                        } else {
+                          const result = await response.json();
+                          alert(result.message || 'Records deleted successfully');
+                          
+                          // Refresh CCD data
+                          await handleShowCCD();
+                          setSelectedCcdRecords(new Set());
+                          setEditedCcdRecords(new Map());
+                          setNewCcdRecords([]);
+                        }
+                      } catch (error: any) {
+                        console.error('Error deleting records:', error);
+                        alert(`Error: ${error.message || 'Failed to delete records'}`);
+                      } finally {
+                        setDeletingCcdRecords(false);
+                      }
+                    }}
+                    disabled={deletingCcdRecords}
+                    className="px-4 py-2 bg-[var(--danger)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {deletingCcdRecords ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        Delete ({selectedCcdRecords.size})
+                      </>
+                    )}
+                  </button>
+                )}
+
                 <label className="text-sm text-[var(--foreground)]">Limit:</label>
                 <input
                   type="number"
@@ -1240,6 +1432,24 @@ export default function Home() {
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="bg-[var(--table-header-bg)] border-b border-[var(--card-border)]">
+                          {/* Checkbox column in edit mode */}
+                          {ccdViewMode === 'edit' && (
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--foreground)] w-12">
+                              <input
+                                type="checkbox"
+                                checked={selectedCcdRecords.size === ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit).length && ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit).length > 0}
+                                onChange={() => {
+                                  const currentPageData = ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit);
+                                  if (selectedCcdRecords.size === currentPageData.length) {
+                                    setSelectedCcdRecords(new Set());
+                                  } else {
+                                    setSelectedCcdRecords(new Set(currentPageData.map((_, idx) => idx)));
+                                  }
+                                }}
+                                className="w-4 h-4 rounded border-[var(--input-border)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
+                              />
+                            </th>
+                          )}
                           {Object.keys(ccdData[0] || {}).map((key) => (
                             <th
                               key={key}
@@ -1251,23 +1461,102 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--card-border)]">
-                        {ccdData
-                          .slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit)
+                        {[...ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit), ...newCcdRecords]
                           .map((row, idx) => (
                             <tr
                               key={idx}
-                              className="hover:bg-[var(--table-row-hover)] transition-colors"
+                              className={`hover:bg-[var(--table-row-hover)] transition-colors ${
+                                ccdViewMode === 'edit' && selectedCcdRecords.has(idx) ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                              }`}
                             >
-                              {Object.keys(ccdData[0] || {}).map((key) => (
-                                <td
-                                  key={key}
-                                  className="px-4 py-3 text-sm text-[var(--foreground)]"
-                                >
-                                  {typeof row[key] === 'object' && row[key] !== null
-                                    ? JSON.stringify(row[key])
-                                    : row[key] || '-'}
+                              {/* Checkbox cell in edit mode */}
+                              {ccdViewMode === 'edit' && (
+                                <td className="px-4 py-3 w-12">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedCcdRecords.has(idx)}
+                                    onChange={() => {
+                                      const newSelected = new Set(selectedCcdRecords);
+                                      if (newSelected.has(idx)) {
+                                        newSelected.delete(idx);
+                                      } else {
+                                        newSelected.add(idx);
+                                      }
+                                      setSelectedCcdRecords(newSelected);
+                                    }}
+                                    className="w-4 h-4 rounded border-[var(--input-border)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
+                                  />
                                 </td>
-                              ))}
+                              )}
+                              {Object.keys(ccdData[0] || {}).map((key) => {
+                                const currentPageData = ccdData.slice((ccdCurrentPage - 1) * ccdLimit, ccdCurrentPage * ccdLimit);
+                                const isNewRecord = idx >= currentPageData.length;
+                                
+                                // Get the current value (either edited or original)
+                                let originalValue, currentValue, isEdited;
+                                
+                                if (isNewRecord) {
+                                  // This is a new record
+                                  const newRecordIndex = idx - currentPageData.length;
+                                  originalValue = newCcdRecords[newRecordIndex][key];
+                                  currentValue = originalValue;
+                                  isEdited = originalValue !== '';
+                                } else {
+                                  // This is an existing record
+                                  originalValue = row[key];
+                                  const editedRow = editedCcdRecords.get(idx);
+                                  currentValue = editedRow && editedRow.hasOwnProperty(key) 
+                                    ? editedRow[key] 
+                                    : originalValue;
+                                  isEdited = editedRow && editedRow.hasOwnProperty(key);
+                                }
+
+                                return (
+                                  <td
+                                    key={key}
+                                    className={`px-4 py-3 text-sm ${isEdited ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isNewRecord ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
+                                  >
+                                    {ccdViewMode === 'edit' ? (
+                                      <input
+                                        type="text"
+                                        value={
+                                          typeof currentValue === 'object' && currentValue !== null
+                                            ? JSON.stringify(currentValue)
+                                            : (currentValue !== null && currentValue !== undefined ? String(currentValue) : '')
+                                        }
+                                        onChange={(e) => {
+                                          if (isNewRecord) {
+                                            // Editing a new record
+                                            const newRecordIndex = idx - currentPageData.length;
+                                            const updatedNewRecords = [...newCcdRecords];
+                                            updatedNewRecords[newRecordIndex] = {
+                                              ...updatedNewRecords[newRecordIndex],
+                                              [key]: e.target.value
+                                            };
+                                            setNewCcdRecords(updatedNewRecords);
+                                          } else {
+                                            // Editing an existing record
+                                            const newEditedRecords = new Map(editedCcdRecords);
+                                            const existingChanges = newEditedRecords.get(idx) || {};
+                                            newEditedRecords.set(idx, {
+                                              ...existingChanges,
+                                              [key]: e.target.value
+                                            });
+                                            setEditedCcdRecords(newEditedRecords);
+                                          }
+                                        }}
+                                        className="w-full px-2 py-1 text-sm border border-[var(--input-border)] rounded bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                                      />
+                                    ) : (
+                                      <span className="text-[var(--foreground)]">
+                                        {typeof currentValue === 'object' && currentValue !== null
+                                          ? JSON.stringify(currentValue)
+                                          : currentValue || '-'}
+                                      </span>
+                                    )}
+                                  </td>
+                                );
+                              })}
                             </tr>
                           ))}
                       </tbody>

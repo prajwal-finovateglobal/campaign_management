@@ -64,3 +64,33 @@ class CutCCDResponse(BaseModel):
     rows_deleted: Optional[int] = None
     tone: str  # "positive", "neutral", or "danger"
 
+
+class DeleteCSVRecordsRequest(BaseModel):
+    records: List[Dict[str, Any]]  # List of records to delete (with identifying fields like phone, contact_to, etc)
+
+
+class DeleteCSVRecordsResponse(BaseModel):
+    success: bool
+    message: str
+    rows_deleted: Optional[int] = None
+
+
+class UpdateCSVRecordsRequest(BaseModel):
+    records: List[Dict[str, Any]]  # List of records with 'original' and 'updated' dicts
+
+
+class UpdateCSVRecordsResponse(BaseModel):
+    success: bool
+    message: str
+    rows_updated: Optional[int] = None
+
+
+class AddCSVRecordsRequest(BaseModel):
+    records: List[Dict[str, Any]]  # List of new records to add
+
+
+class AddCSVRecordsResponse(BaseModel):
+    success: bool
+    message: str
+    rows_added: Optional[int] = None
+
