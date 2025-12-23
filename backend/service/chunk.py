@@ -151,8 +151,9 @@ def create_chunks(
                 "created_at": new_chunk.created_at.isoformat() if new_chunk.created_at else None
             })
         
-        # Update parent campaign type to 'multiple'
+        # Update parent campaign type to 'multiple' and store chunk_size
         campaign.type = 'multiple'
+        campaign.chunk_size = chunk_size
         
         db.commit()
         

@@ -36,6 +36,7 @@ interface Campaign {
   type: string | null;  // 'single' or 'multiple'
   record_count: number | null;
   status: string | null;
+  chunk_size: number | null;  // Chunk size for multiple type campaigns
 }
 
 interface Phone {
@@ -127,7 +128,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     show: boolean;
     campaignId: number | null;
     campaignName: string | null;
-  }>({ show: false, campaignId: null, campaignName: null });
+    chunkSize: number | null;
+  }>({ show: false, campaignId: null, campaignName: null, chunkSize: null });
   const [chunkedUpsertPreviews, setChunkedUpsertPreviews] = useState<any[]>([]);
   const [totalChunksCount, setTotalChunksCount] = useState<number>(0);
   const [chunksPreviewLimit, setChunksPreviewLimit] = useState<number>(5);
@@ -1307,7 +1309,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                           setChunkedUpsertModal({
                                             show: true,
                                             campaignId: campaign.id,
-                                            campaignName: campaign.campaign_name || ''
+                                            campaignName: campaign.campaign_name || '',
+                                            chunkSize: campaign.chunk_size || 25
                                           });
                                           
                                           try {
@@ -2674,7 +2677,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Upsert Chunked Campaign</h3>
               <button
                 onClick={() => {
-                  setChunkedUpsertModal({ show: false, campaignId: null, campaignName: null });
+                  setChunkedUpsertModal({ show: false, campaignId: null, campaignName: null, chunkSize: null });
                   setChunkedUpsertPreviews([]);
                   setTotalChunksCount(0);
                 }}
@@ -2689,7 +2692,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
             <div className="flex items-center gap-3 justify-end mb-4 pb-4 border-b border-[var(--card-border)]">
               <button
                 onClick={() => {
-                  setChunkedUpsertModal({ show: false, campaignId: null, campaignName: null });
+                  setChunkedUpsertModal({ show: false, campaignId: null, campaignName: null, chunkSize: null });
                   setChunkedUpsertPreviews([]);
                   setTotalChunksCount(0);
                 }}
@@ -2725,9 +2728,9 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                       return;
                     }
                     
-                    // Get chunk_size from first chunk's records_count (or use a default)
-                    const chunkSize = chunks[0].records_count || 25;
-                    console.log('Using chunk size:', chunkSize);
+                    // Get chunk_size from the campaign (stored when chunks were created)
+                    const chunkSize = chunkedUpsertModal.chunkSize || 25;
+                    console.log('Using chunk size:', chunkSize, '(from campaign.chunk_size)');
                     
                     let successCount = 0;
                     let failedChunks: string[] = [];

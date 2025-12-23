@@ -50,6 +50,7 @@ class Campaign(Base):
     phone_id = Column(String, nullable=True)  # Phone ID from Millis.ai
     agent_id = Column(String, nullable=True)  # Agent ID from Millis.ai
     type = Column(String, nullable=True)  # Campaign type
+    chunk_size = Column(Integer, nullable=True)  # Chunk size used when creating chunks (for multiple type)
 
     # Relationships
     phase = relationship('Phase', back_populates='campaigns')

@@ -52,7 +52,8 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
             'agent_id': campaign.agent_id,
             'type': campaign_type,  # Campaign type (single/multiple)
             'record_count': record_count,  # Use DB value first, or sum of chunks for multiple type
-            'status': status  # Use DB value first
+            'status': status,  # Use DB value first
+            'chunk_size': campaign.chunk_size if campaign.chunk_size else None  # Chunk size for multiple type campaigns
         }
         campaigns.append(campaign_dict)
         
@@ -386,7 +387,8 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
                 'agent_id': campaign.agent_id,
                 'type': campaign_type,
                 'record_count': record_count,  # Will be updated from Millis if fetch succeeds (only for single type)
-                'status': campaign.status  # Will be updated from Millis if fetch succeeds
+                'status': campaign.status,  # Will be updated from Millis if fetch succeeds
+                'chunk_size': campaign.chunk_size if campaign.chunk_size else None  # Chunk size for multiple type campaigns
             }
             
             # Only refresh from Millis.ai for single-type campaigns
@@ -508,15 +510,17 @@ def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
                 logger.info(f"Deleted {len(chunks)} chunks from database")
         else:
             # Handle single-type campaigns
-            # Delete campaign from Millis.ai if CID exists
-            if campaign_cid:
-                millis_success, millis_error = delete_campaign_in_millis(campaign_cid)
-                if not millis_success:
-                    logger.warning(f"Failed to delete campaign from Millis.ai: {millis_error}")
-                    # Continue with database deletion even if Millis.ai deletion fails
-                    # This allows cleanup of orphaned database records
-            else:
-                logger.info(f"Campaign {campaign_id} has no CID, skipping Millis.ai deletion")
+            pass
+        
+        # Delete campaign from Millis.ai if CID exists
+        if campaign_cid:
+            millis_success, millis_error = delete_campaign_in_millis(campaign_cid)
+            if not millis_success:
+                logger.warning(f"Failed to delete campaign from Millis.ai: {millis_error}")
+                # Continue with database deletion even if Millis.ai deletion fails
+                # This allows cleanup of orphaned database records
+        else:
+            logger.info(f"Campaign {campaign_id} has no CID, skipping Millis.ai deletion")
         
         # Delete campaign from database
         db.delete(campaign)
@@ -741,26 +745,26 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
                 error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
                 logger.error(error_msg)
                 return False, error_msg, None
-            
-            # Set caller in Millis.ai
-            millis_success, millis_error = set_caller(campaign.cid, phone_id)
-            if not millis_success:
-                error_msg = millis_error or "Failed to set caller in Millis.ai"
-                logger.error(error_msg)
-                return False, error_msg, None
-            
-            # Update database
-            campaign.phone_id = phone_id
-            campaign.agent_id = agent_id
-            db.commit()
-            db.refresh(campaign)
-            
-            logger.info(f"Successfully set caller {phone_id} (agent_id: {agent_id}) for campaign {campaign_id}")
-            return True, None, {
-                'agent_id': agent_id,
-                'chunks_updated': None,  # Not applicable for single-type campaigns
-                'total_chunks': None
-            }
+        
+        # Set caller in Millis.ai
+        millis_success, millis_error = set_caller(campaign.cid, phone_id)
+        if not millis_success:
+            error_msg = millis_error or "Failed to set caller in Millis.ai"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        # Update database
+        campaign.phone_id = phone_id
+        campaign.agent_id = agent_id
+        db.commit()
+        db.refresh(campaign)
+        
+        logger.info(f"Successfully set caller {phone_id} (agent_id: {agent_id}) for campaign {campaign_id}")
+        return True, None, {
+            'agent_id': agent_id,
+            'chunks_updated': None,  # Not applicable for single-type campaigns
+            'total_chunks': None
+        }
         
     except Exception as e:
         db.rollback()
