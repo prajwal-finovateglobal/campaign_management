@@ -5,6 +5,7 @@ from typing import Optional
 class CreateCampaignRequest(BaseModel):
     phase_id: int
     phase_name: str
+    campaign_type: str = 'single'  # 'single' or 'multiple'
 
 
 class CreateCampaignResponse(BaseModel):
@@ -15,6 +16,7 @@ class CreateCampaignResponse(BaseModel):
     status: Optional[str] = None
     record_count: Optional[int] = None
     phase_id: Optional[int] = None
+    type: Optional[str] = None
     message: Optional[str] = None
 
 

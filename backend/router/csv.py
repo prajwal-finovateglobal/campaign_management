@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from service.csv_service import append_to_csv, get_existing_columns, clear_csv, read_csv_data, set_campaign_id, get_unique_campaign_ids, format_phone_numbers, upload_csv_file, cut_ccd, delete_csv_records, update_csv_records
 from schema.csv import LoadDataRequest, LoadDataResponse, DeletePCDResponse, GetCSVDataResponse, SetCampaignIdRequest, SetCampaignIdResponse, GetCampaignIdsResponse, FormatPhoneNumbersResponse, UploadCSVResponse, CutCCDRequest, CutCCDResponse, DeleteCSVRecordsRequest, DeleteCSVRecordsResponse, UpdateCSVRecordsRequest, UpdateCSVRecordsResponse, AddCSVRecordsRequest, AddCSVRecordsResponse
+from typing import Optional
 import loguru
 
 router = APIRouter()
@@ -535,5 +536,86 @@ def add_csv_records_endpoint(request: AddCSVRecordsRequest):
                 "message": f"Unexpected error: {str(e)}",
                 "rows_added": None
             }
+        )
+
+
+@router.get("/get_csv_preview")
+def get_csv_preview(
+    limit: int = Query(5, description="Number of records to preview"),
+    campaign_id: Optional[int] = Query(None, description="Filter by campaign ID")
+):
+    """
+    Get a preview of records from data.csv.
+    Optionally filter by campaign_id and limit the number of records returned.
+    
+    Args:
+        limit: Number of records to return (default: 5)
+        campaign_id: Optional campaign ID to filter records
+    
+    Returns:
+        Preview records from data.csv
+    """
+    logger.info(f"Fetching CSV preview with limit={limit}, campaign_id={campaign_id}")
+    
+    try:
+        import pandas as pd
+        from pathlib import Path
+        
+        # Use the same path pattern as csv_service.py
+        csv_path = Path(__file__).parent.parent / "data" / "data.csv"
+        
+        if not csv_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="data.csv file not found"
+            )
+        
+        # Read CSV
+        df = pd.read_csv(csv_path)
+        
+        total_records_in_csv = len(df)
+        logger.info(f"Total records in CSV: {total_records_in_csv}")
+        
+        # Filter by campaign_id if provided
+        if campaign_id is not None:
+            if 'campaign_id' not in df.columns:
+                logger.warning(f"campaign_id column not found in CSV. Available columns: {df.columns.tolist()}")
+            else:
+                # Convert campaign_id column to int for comparison
+                df['campaign_id'] = pd.to_numeric(df['campaign_id'], errors='coerce')
+                
+                # Log unique campaign_ids in CSV for debugging BEFORE filtering
+                unique_ids = df['campaign_id'].dropna().unique().tolist()
+                logger.info(f"Unique campaign_ids in CSV: {unique_ids}")
+                
+                original_count = len(df)
+                df = df[df['campaign_id'] == campaign_id]
+                filtered_count = len(df)
+                logger.info(f"Filtered from {original_count} to {filtered_count} records for campaign_id={campaign_id}")
+        
+        # Limit records
+        df = df.head(limit)
+        
+        # Replace NaN values with None (for JSON serialization)
+        df = df.fillna('')
+        
+        # Convert to dict
+        records = df.to_dict('records')
+        
+        return {
+            "success": True,
+            "records": records,
+            "total_count": len(records),
+            "total_in_csv": total_records_in_csv,
+            "campaign_id": campaign_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching CSV preview: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching CSV preview: {str(e)}"
         )
 

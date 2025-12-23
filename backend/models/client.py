@@ -9,7 +9,7 @@ from sqlalchemy import ForeignKey
 from models.tables import DataLog  # noqa: F401
 
 class Client(Base):
-    __tablename__ = "client"
+    __tablename__ = "cms_client"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     name = Column(String, nullable=False)
@@ -23,11 +23,11 @@ class Client(Base):
 
 
 class Phase(Base):
-    __tablename__ = "phase"
+    __tablename__ = "cms_phase"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     name = Column(String, nullable=False)
-    client_id = Column(Integer, ForeignKey('client.id'), nullable=False)
+    client_id = Column(Integer, ForeignKey('cms_client.id'), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=True, server_default="CURRENT_TIMESTAMP")
     # Note: status and records_count were mistakenly added to phase table but should not be used
     # They exist in DB but are not part of the model to avoid confusion
@@ -37,20 +37,41 @@ class Phase(Base):
     campaigns = relationship('Campaign', back_populates='phase', cascade='all, delete-orphan')
 
 class Campaign(Base):
-    __tablename__ = "campaign"
+    __tablename__ = "cms_campaign"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     campaign_name = Column(String, nullable=True)
     upsert_time = Column(DateTime, nullable=True)
-    phase_id = Column(Integer, ForeignKey('phase.id'), nullable=True)
+    phase_id = Column(Integer, ForeignKey('cms_phase.id'), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True, server_default="CURRENT_TIMESTAMP")
     cid = Column(Text, nullable=True)  # Changed from String to Text per DDL
     status = Column(String, nullable=True)  # Campaign status from Millis.ai
     records_count = Column(Integer, nullable=True)  # Record count from Millis.ai
     phone_id = Column(String, nullable=True)  # Phone ID from Millis.ai
     agent_id = Column(String, nullable=True)  # Agent ID from Millis.ai
+    type = Column(String, nullable=True)  # Campaign type
 
     # Relationships
     phase = relationship('Phase', back_populates='campaigns')
+    chunks = relationship('Chunk', back_populates='campaign', cascade='all, delete-orphan')
     # Note: DataLog (dummy_table) doesn't have foreign key on campaign_id, so relationship removed
     # Access data logs through queries filtering by campaign_id instead
+
+
+class Chunk(Base):
+    __tablename__ = "cms_chunks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    chunk_name = Column(String, nullable=True)
+    upsert_time = Column(DateTime, nullable=True)
+    campaign_id = Column(Integer, ForeignKey('cms_campaign.id'), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True, server_default="CURRENT_TIMESTAMP")
+    cid = Column(Text, nullable=True)  # Chunk ID from Millis.ai
+    status = Column(String, nullable=True)  # Chunk status from Millis.ai
+    records_count = Column(Integer, nullable=True)  # Record count from Millis.ai
+    phone_id = Column(String, nullable=True)  # Phone ID from Millis.ai
+    agent_id = Column(String, nullable=True)  # Agent ID from Millis.ai
+    upload_status = Column(String, nullable=True)  # Upload status: 'done' or null
+
+    # Relationships
+    campaign = relationship('Campaign', back_populates='chunks')

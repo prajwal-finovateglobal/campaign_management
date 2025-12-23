@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle } from 'lucide-react';
+import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database } from 'lucide-react';
 import { DataTable } from './DataTable';
 import { api } from '@/lib/api';
 
@@ -33,6 +33,7 @@ interface Campaign {
   cid: string | null;
   phone_id: string | null;
   agent_id: string | null;
+  type: string | null;  // 'single' or 'multiple'
   record_count: number | null;
   status: string | null;
 }
@@ -85,7 +86,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [createdCampaign, setCreatedCampaign] = useState<{
     id: number;
     campaign_name: string;
-    cid: string;
+    cid: string | null;
     status: string;
     record_count: number;
     phase_id: number;
@@ -110,6 +111,52 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     campaignCid: string | null;
     phaseName: string | null;
   }>({ show: false, campaignId: null, campaignName: null, campaignCid: null, phaseName: null });
+  
+  // Upsert confirmation modal states
+  const [upsertConfirmModal, setUpsertConfirmModal] = useState<{
+    show: boolean;
+    campaignId: number | null;
+    campaignName: string | null;
+  }>({ show: false, campaignId: null, campaignName: null });
+  const [upsertPreviewRecords, setUpsertPreviewRecords] = useState<any[]>([]);
+  const [loadingUpsertPreview, setLoadingUpsertPreview] = useState(false);
+  const [upserting, setUpserting] = useState(false);
+  
+  // Chunked campaigns upsert modal states
+  const [chunkedUpsertModal, setChunkedUpsertModal] = useState<{
+    show: boolean;
+    campaignId: number | null;
+    campaignName: string | null;
+  }>({ show: false, campaignId: null, campaignName: null });
+  const [chunkedUpsertPreviews, setChunkedUpsertPreviews] = useState<any[]>([]);
+  const [totalChunksCount, setTotalChunksCount] = useState<number>(0);
+  const [chunksPreviewLimit, setChunksPreviewLimit] = useState<number>(5);
+  const [loadingChunkedPreviews, setLoadingChunkedPreviews] = useState(false);
+  const [upsertingChunks, setUpsertingChunks] = useState(false);
+  const [chunkProgress, setChunkProgress] = useState<Record<string, { status: string; message: string; records_count?: number }>>({});
+  
+  // Set phone for chunks states
+  const [settingChunkPhones, setSettingChunkPhones] = useState<number | null>(null);
+
+  // Chunks modal states
+  const [showChunksModal, setShowChunksModal] = useState<{
+    show: boolean;
+    campaignId: number | null;
+    campaignName: string;
+  }>({ show: false, campaignId: null, campaignName: '' });
+  const [chunks, setChunks] = useState<any[]>([]);
+  const [loadingChunks, setLoadingChunks] = useState(false);
+
+  // Create chunks modal states
+  const [showCreateChunksModal, setShowCreateChunksModal] = useState<{
+    show: boolean;
+    campaignId: number | null;
+    campaignName: string;
+  }>({ show: false, campaignId: null, campaignName: '' });
+  const [chunkSize, setChunkSize] = useState<number>(25);
+  const [chunksPreview, setChunksPreview] = useState<any>(null);
+  const [calculatingChunks, setCalculatingChunks] = useState(false);
+  const [creatingChunks, setCreatingChunks] = useState(false);
   const [uploadingRecords, setUploadingRecords] = useState(false);
   const [formattingPhoneNumbers, setFormattingPhoneNumbers] = useState(false);
   const [phoneFormatMessage, setPhoneFormatMessage] = useState<string | null>(null);
@@ -129,6 +176,12 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     action: 'start' | 'stop' | null;
     campaign: Campaign | null;
   }>({ show: false, action: null, campaign: null });
+  
+  // Chunk upsert warning modal
+  const [chunkWarningModal, setChunkWarningModal] = useState<{
+    show: boolean;
+    chunkNames: string[];
+  }>({ show: false, chunkNames: [] });
   
   // Upload metadata states
   const [uploadMetadataEnabled, setUploadMetadataEnabled] = useState(false);
@@ -398,6 +451,34 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
 
   // Function to open phone selection modal
   const handleOpenPhoneModal = async (campaignId: number) => {
+    // Check if campaign is of type 'multiple'
+    const campaign = campaigns.find(c => c.id === campaignId);
+    if (campaign?.type === 'multiple') {
+      // Check if chunks have been upserted by fetching chunk details
+      try {
+        const chunksResponse = await api.get(`/chunk/campaign/${campaignId}`);
+        if (chunksResponse.ok) {
+          const chunksData = await chunksResponse.json();
+          const chunks = chunksData.chunks || [];
+          
+          // Check if any chunk has no records uploaded (records_count is 0 or null)
+          const unupsertedChunks = chunks.filter((chunk: any) => 
+            !chunk.records_count || chunk.records_count === 0
+          );
+          
+          if (unupsertedChunks.length > 0) {
+            const chunkNames = unupsertedChunks.map((c: any) => c.chunk_name);
+            setChunkWarningModal({ show: true, chunkNames });
+            return;  // Don't open modal
+          }
+        }
+      } catch (error) {
+        console.error('Error checking chunks:', error);
+        // If there's an error checking, still allow them to proceed
+        // The backend will catch issues if any
+      }
+    }
+    
     setPhoneModalCampaignId(campaignId);
     setShowPhoneModal(true);
     setLoadingPhones(true);
@@ -948,6 +1029,12 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                             Created At
                           </th>
                           <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">
+                            Caller
+                          </th>
+                          <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">
+                            Start
+                          </th>
+                          <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">
                             Actions
                           </th>
                         </tr>
@@ -969,7 +1056,35 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               {campaign.campaign_name || 'N/A'}
                             </td>
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
-                              {campaign.cid || 'N/A'}
+                              {campaign.type === 'multiple' ? (
+                                <button
+                                  onClick={async () => {
+                                    // Open chunks modal and fetch chunks
+                                    setShowChunksModal({ show: true, campaignId: campaign.id, campaignName: campaign.campaign_name || '' });
+                                    setLoadingChunks(true);
+                                    try {
+                                      const response = await api.get(`/chunk/campaign/${campaign.id}`);
+                                      if (response.ok) {
+                                        const result = await response.json();
+                                        setChunks(result.chunks || []);
+                                      } else {
+                                        const errorData = await response.json();
+                                        alert(errorData.detail || 'Failed to fetch chunks');
+                                      }
+                                    } catch (error: any) {
+                                      console.error('Error fetching chunks:', error);
+                                      alert(`Error: ${error.message || 'Failed to fetch chunks'}`);
+                                    } finally {
+                                      setLoadingChunks(false);
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-[var(--primary)] text-white rounded text-xs hover:bg-[var(--primary-hover)] transition-colors"
+                                >
+                                  Show Chunks
+                                </button>
+                              ) : (
+                                campaign.cid || 'N/A'
+                              )}
                             </td>
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
                               <div className="flex items-center gap-2">
@@ -1086,40 +1201,76 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               ) : null}
                             </td>
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
-                              <div className="flex items-center gap-2">
-                                {campaign.status === 'idle' && (
-                                  <button
-                                  onClick={async () => {
-                                    setSettingCid(campaign.id);
-                                    try {
-                                      const response = await api.post('/set_campaign_id', {
-                                        campaign_id: campaign.id,
-                                      });
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {/* SINGLE TYPE CAMPAIGNS */}
+                                {campaign.type === 'single' && (
+                                  <>
+                                    {/* Upsert button - only show for idle campaigns */}
+                                    {campaign.status === 'idle' && (
+                                      <button
+                                        onClick={async () => {
+                                          // Fetch first 5 records from data.csv for preview
+                                          setLoadingUpsertPreview(true);
+                                          setUpsertConfirmModal({
+                                            show: true,
+                                            campaignId: campaign.id,
+                                            campaignName: campaign.campaign_name || ''
+                                          });
+                                          
+                                          try {
+                                            const response = await api.get(`/get_csv_preview?limit=5&campaign_id=${campaign.id}`);
+                                            if (response.ok) {
+                                              const result = await response.json();
+                                              setUpsertPreviewRecords(result.records || []);
+                                            } else {
+                                              console.error('Failed to fetch preview records');
+                                              setUpsertPreviewRecords([]);
+                                            }
+                                          } catch (error) {
+                                            console.error('Error fetching preview:', error);
+                                            setUpsertPreviewRecords([]);
+                                          } finally {
+                                            setLoadingUpsertPreview(false);
+                                          }
+                                        }}
+                                        className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                                      >
+                                        Upsert
+                                      </button>
+                                    )}
+                                    {campaign.status === 'idle' && (
+                                      <button
+                                      onClick={async () => {
+                                        setSettingCid(campaign.id);
+                                        try {
+                                          const response = await api.post('/set_campaign_id', {
+                                            campaign_id: campaign.id,
+                                          });
 
-                                      if (!response.ok) {
-                                        const errorData = await response.json();
-                                        const errorDetail = errorData.detail || errorData;
-                                        alert(errorDetail.message || 'Failed to set campaign ID');
-                                      } else {
-                                        const result = await response.json();
-                                        alert(result.message || 'Campaign ID set successfully');
-                                        // Refresh campaign IDs
-                                        const idsResponse = await api.get('/get_campaign_ids');
-                                        if (idsResponse.ok) {
-                                          const idsResult = await idsResponse.json();
-                                          setCsvCampaignIds(idsResult.campaign_ids || []);
+                                          if (!response.ok) {
+                                            const errorData = await response.json();
+                                            const errorDetail = errorData.detail || errorData;
+                                            alert(errorDetail.message || 'Failed to set campaign ID');
+                                          } else {
+                                            const result = await response.json();
+                                            alert(result.message || 'Campaign ID set successfully');
+                                            // Refresh campaign IDs
+                                            const idsResponse = await api.get('/get_campaign_ids');
+                                            if (idsResponse.ok) {
+                                              const idsResult = await idsResponse.json();
+                                              setCsvCampaignIds(idsResult.campaign_ids || []);
+                                            }
+                                          }
+                                        } catch (error: any) {
+                                          console.error('Error setting CID:', error);
+                                          alert(`Error: ${error.message || 'Failed to set campaign ID'}`);
+                                        } finally {
+                                          setSettingCid(null);
                                         }
-                                      }
-                                    } catch (error: any) {
-                                      console.error('Error setting CID:', error);
-                                      alert(`Error: ${error.message || 'Failed to set campaign ID'}`);
-                                    } finally {
-                                      setSettingCid(null);
-                                    }
-                                  }}
-                                  disabled={settingCid === campaign.id}
-                                  className="px-3 py-1 bg-[var(--primary)] text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                                >
+                                      }}
+                                      disabled={settingCid === campaign.id}
+                                      className="px-3 py-1 bg-[var(--primary)] text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                                    >
                                   {settingCid === campaign.id ? (
                                     <>
                                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -1130,6 +1281,128 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                   )}
                                 </button>
                               )}
+                                  </>
+                                )}
+                                
+                                {/* MULTIPLE TYPE CAMPAIGNS (CHUNKED) */}
+                                {campaign.type === 'multiple' && (
+                                  <>
+                                    {/* Set Phone button - show for all non-finished campaigns */}
+                                    {campaign.status !== 'finished' && campaign.status !== 'started' && (
+                                      <button
+                                        onClick={() => handleOpenPhoneModal(campaign.id)}
+                                        disabled={settingChunkPhones === campaign.id}
+                                        className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Set Phone ID for all chunks"
+                                      >
+                                        {settingChunkPhones === campaign.id ? 'Setting...' : 'Set Phone'}
+                                      </button>
+                                    )}
+                                    
+                                    {/* Upsert button - show when status is not finished */}
+                                    {campaign.status !== 'finished' && (
+                                      <button
+                                        onClick={async () => {
+                                          setLoadingChunkedPreviews(true);
+                                          setChunkedUpsertModal({
+                                            show: true,
+                                            campaignId: campaign.id,
+                                            campaignName: campaign.campaign_name || ''
+                                          });
+                                          
+                                          try {
+                                            // Fetch chunks for this campaign
+                                            const chunksResponse = await api.get(`/chunk/campaign/${campaign.id}`);
+                                            if (chunksResponse.ok) {
+                                              const chunksData = await chunksResponse.json();
+                                              const chunks = chunksData.chunks || [];
+                                              setTotalChunksCount(chunks.length);
+                                              // Set preview limit to 5 by default
+                                              setChunksPreviewLimit(5);
+                                              
+                                              // For each chunk, fetch first 2 records preview (show first 5 chunks by default)
+                                              const previewsPromises = chunks.slice(0, 5).map(async (chunk: any) => {
+                                                try {
+                                                  const previewResponse = await api.get(`/get_csv_preview?limit=2&campaign_id=${campaign.id}`);
+                                                  if (previewResponse.ok) {
+                                                    const previewData = await previewResponse.json();
+                                                    return {
+                                                      chunk_name: chunk.chunk_name,
+                                                      chunk_id: chunk.id,
+                                                      records: previewData.records || []
+                                                    };
+                                                  }
+                                                } catch (error) {
+                                                  console.error(`Error fetching preview for chunk ${chunk.chunk_name}:`, error);
+                                                }
+                                                return {
+                                                  chunk_name: chunk.chunk_name,
+                                                  chunk_id: chunk.id,
+                                                  records: []
+                                                };
+                                              });
+                                              
+                                              const previews = await Promise.all(previewsPromises);
+                                              setChunkedUpsertPreviews(previews);
+                                            } else {
+                                              setChunkedUpsertPreviews([]);
+                                            }
+                                          } catch (error) {
+                                            console.error('Error fetching chunk previews:', error);
+                                            setChunkedUpsertPreviews([]);
+                                          } finally {
+                                            setLoadingChunkedPreviews(false);
+                                          }
+                                        }}
+                                        className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                                        title="Upsert all chunks to Millis.ai"
+                                      >
+                                        Upsert
+                                      </button>
+                                    )}
+                                    
+                                    {/* Set CID button - show when status is not finished */}
+                                    {campaign.status !== 'finished' && (
+                                      <button
+                                        onClick={async () => {
+                                          setSettingCid(campaign.id);
+                                          try {
+                                            const response = await api.post('/set_campaign_id', {
+                                              campaign_id: campaign.id,
+                                            });
+
+                                            if (!response.ok) {
+                                              const errorData = await response.json();
+                                              const errorDetail = errorData.detail || errorData;
+                                              alert(errorDetail.message || 'Failed to set campaign ID');
+                                            } else {
+                                              const result = await response.json();
+                                              alert(result.message || 'Campaign ID set successfully in data.csv');
+                                              // Refresh campaign IDs
+                                              const idsResponse = await api.get('/get_campaign_ids');
+                                              if (idsResponse.ok) {
+                                                const idsResult = await idsResponse.json();
+                                                setCsvCampaignIds(idsResult.campaign_ids || []);
+                                              }
+                                            }
+                                          } catch (error: any) {
+                                            console.error('Error setting CID:', error);
+                                            alert(`Error: ${error.message || 'Failed to set campaign ID'}`);
+                                          } finally {
+                                            setSettingCid(null);
+                                          }
+                                        }}
+                                        disabled={settingCid === campaign.id}
+                                        className="px-3 py-1 bg-[var(--primary)] text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Set logical campaign ID in data.csv"
+                                      >
+                                        {settingCid === campaign.id ? 'Setting...' : 'Set CID'}
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                                
+                                {/* Delete button - common for both types */}
                               <button
                                 onClick={() => {
                                   setDeleteConfirmModal({
@@ -1384,10 +1657,378 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   </div>
                 )}
 
-                {/* Multiple Mode Content - Placeholder */}
+                {/* Multiple Mode Content - Campaign with Chunks */}
                 {newCampaignMode === 'multiple' && (
-                  <div className="p-4 bg-[var(--input-bg)] rounded-md border border-[var(--input-border)]">
-                    <p className="text-sm text-[var(--secondary)]">Multiple campaign creation will be implemented here.</p>
+                  <div className="space-y-4 p-4 bg-[var(--input-bg)] rounded-md border border-[var(--input-border)]">
+                    {!createdCampaign ? (
+                      <div className="space-y-4">
+                        {/* Info Banner */}
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                          <p className="text-sm text-blue-800 dark:text-blue-200">
+                            <strong>Multiple Mode:</strong> Create a campaign first, then divide it into chunks based on data.csv records.
+                          </p>
+                        </div>
+
+                        {/* Create Campaign Button */}
+                        <div>
+                          <button
+                            onClick={async () => {
+                              if (!selectedPhaseId) {
+                                alert('Please select a phase first');
+                                return;
+                              }
+
+                              const selectedPhase = phases.find(p => p.id === selectedPhaseId);
+                              if (!selectedPhase) {
+                                alert('Error: Phase not found');
+                                return;
+                              }
+
+                              setCreatingCampaign(true);
+                              setCampaignIdMessage(null);
+                              
+                              try {
+                                const response = await api.post('/campaign/create', {
+                                  phase_id: selectedPhaseId,
+                                  phase_name: selectedPhase.name,
+                                  campaign_type: 'multiple'  // Virtual campaign, no Millis.ai creation
+                                });
+
+                                if (!response.ok) {
+                                  const errorData = await response.json();
+                                  const errorDetail = errorData.detail || errorData;
+                                  let errorMessage = 'Failed to create campaign';
+                                  
+                                  if (errorDetail.message) {
+                                    errorMessage = errorDetail.message;
+                                  } else if (typeof errorDetail === 'string') {
+                                    errorMessage = errorDetail;
+                                  }
+                                  
+                                  setCampaignIdMessage(`Error: ${errorMessage}`);
+                                  setTimeout(() => setCampaignIdMessage(null), 5000);
+                                  return;
+                                }
+
+                                const result = await response.json();
+                                
+                                // Virtual campaign created in DB only (no CID yet)
+                                setCreatedCampaign({
+                                  id: result.id,
+                                  campaign_name: result.campaign_name,
+                                  cid: null,  // No CID for virtual campaign
+                                  status: result.status,
+                                  record_count: 0,
+                                  phase_id: result.phase_id
+                                });
+                                
+                                setCampaignIdMessage('Virtual campaign created successfully! Now set chunk size to divide into chunks.');
+                                setTimeout(() => setCampaignIdMessage(null), 5000);
+                              } catch (error: any) {
+                                console.error('Error creating campaign:', error);
+                                setCampaignIdMessage(`Error: ${error.message || 'Failed to create campaign'}`);
+                                setTimeout(() => setCampaignIdMessage(null), 5000);
+                              } finally {
+                                setCreatingCampaign(false);
+                              }
+                            }}
+                            disabled={creatingCampaign || !selectedPhaseId}
+                            className="px-6 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                          >
+                            {creatingCampaign ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Creating Campaign...
+                              </>
+                            ) : (
+                              'Create Campaign'
+                            )}
+                          </button>
+                          {campaignIdMessage && (
+                            <div className={`mt-2 p-3 rounded-md text-sm ${
+                              campaignIdMessage.toLowerCase().includes('error')
+                                ? 'bg-[var(--danger)] text-white'
+                                : 'bg-[var(--success)] text-white'
+                            }`}>
+                              {campaignIdMessage}
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+                    ) : (
+                      /* Created Campaign - Now Add Chunks */
+                      <div className="space-y-4">
+                        {/* Campaign Info */}
+                        <div className="p-4 bg-[var(--card-bg)] rounded-md border border-[var(--card-border)]">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-semibold text-[var(--foreground)]">Virtual Campaign Created:</h4>
+                            <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                              Multiple Mode
+                            </span>
+                          </div>
+                          <div className="space-y-3">
+                            <div>
+                              <span className="text-xs text-[var(--secondary)]">Campaign Name:</span>
+                              <p className="text-sm font-medium text-[var(--foreground)]">{createdCampaign.campaign_name}</p>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div>
+                                <span className="text-xs text-[var(--secondary)]">Campaign ID:</span>
+                                <p className="text-sm font-medium text-[var(--foreground)]">{createdCampaign.id}</p>
+                              </div>
+                              <div>
+                                <span className="text-xs text-[var(--secondary)]">Type:</span>
+                                <p className="text-sm font-medium text-[var(--foreground)]">Virtual (no CID)</p>
+                              </div>
+                            </div>
+                            <div className="pt-2 border-t border-[var(--card-border)]">
+                              <button
+                                onClick={async () => {
+                                  if (!createdCampaign) return;
+                                  
+                                  setSettingCampaignId(true);
+                                  setCampaignIdMessage(null);
+                                  
+                                  try {
+                                    const response = await api.post('/set_campaign_id', {
+                                      campaign_id: createdCampaign.id,
+                                    });
+
+                                    if (!response.ok) {
+                                      const errorData = await response.json();
+                                      const errorDetail = errorData.detail || errorData;
+                                      let errorMessage = 'Failed to set campaign ID';
+                                      
+                                      if (errorDetail.message) {
+                                        errorMessage = errorDetail.message;
+                                      } else if (typeof errorDetail === 'string') {
+                                        errorMessage = errorDetail;
+                                      }
+                                      
+                                      setCampaignIdMessage(errorMessage);
+                                      setTimeout(() => setCampaignIdMessage(null), 5000);
+                                      return;
+                                    }
+
+                                    const result = await response.json();
+                                    setCampaignIdMessage(result.message || `Successfully set campaign ID for ${result.records_updated || 0} records in data.csv`);
+                                    setTimeout(() => setCampaignIdMessage(null), 7000);
+                                  } catch (error: any) {
+                                    console.error('Error setting campaign ID:', error);
+                                    setCampaignIdMessage(`Error: ${error.message || 'Failed to set campaign ID'}`);
+                                    setTimeout(() => setCampaignIdMessage(null), 5000);
+                                  } finally {
+                                    setSettingCampaignId(false);
+                                  }
+                                }}
+                                disabled={settingCampaignId}
+                                className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              >
+                                {settingCampaignId ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Setting Campaign ID in data.csv...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Database className="w-4 h-4" />
+                                    Set Campaign ID in data.csv
+                                  </>
+                                )}
+                              </button>
+                              {campaignIdMessage && (
+                                <div className={`mt-2 p-2 rounded text-xs ${
+                                  campaignIdMessage.toLowerCase().includes('error')
+                                    ? 'bg-red-100 text-red-800'
+                                    : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {campaignIdMessage}
+                                </div>
+                              )}
+                              <p className="text-xs text-[var(--secondary)] mt-2">
+                                ℹ️ This sets the campaign ID in data.csv so records are associated with this campaign
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Chunk Size Input */}
+                        {!chunksPreview && (
+                          <div>
+                            <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                              Chunk Size (records per chunk) <span className="text-red-500">*</span>
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                min="1"
+                                value={chunkSize}
+                                onChange={(e) => setChunkSize(parseInt(e.target.value) || 1)}
+                                placeholder="e.g., 25"
+                                className="flex-1 px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                              />
+                              <button
+                                onClick={async () => {
+                                  if (!createdCampaign) return;
+                                  
+                                  setCalculatingChunks(true);
+                                  try {
+                                    const response = await api.post('/chunk/calculate', {
+                                      campaign_id: createdCampaign.id,
+                                      chunk_size: chunkSize
+                                    });
+
+                                    if (response.ok) {
+                                      const result = await response.json();
+                                      setChunksPreview(result);
+                                    } else {
+                                      const errorData = await response.json();
+                                      alert(errorData.detail || 'Failed to calculate chunks');
+                                    }
+                                  } catch (error: any) {
+                                    console.error('Error calculating chunks:', error);
+                                    alert(`Error: ${error.message || 'Failed to calculate chunks'}`);
+                                  } finally {
+                                    setCalculatingChunks(false);
+                                  }
+                                }}
+                                disabled={calculatingChunks}
+                                className="px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {calculatingChunks ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                                    Calculating...
+                                  </>
+                                ) : (
+                                  'Preview Chunks'
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-xs text-[var(--secondary)] mt-1">
+                              Enter the number of records you want in each chunk
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Chunks Preview */}
+                        {chunksPreview && (
+                          <div className="space-y-4">
+                            <div className="p-4 bg-[var(--card-bg)] rounded-md border border-[var(--card-border)]">
+                              <h4 className="text-sm font-semibold text-[var(--foreground)] mb-3 flex items-center gap-2">
+                                📊 Chunks Preview
+                              </h4>
+                              <div className="grid grid-cols-2 gap-4 mb-3">
+                                <div>
+                                  <span className="text-xs text-[var(--secondary)]">Total Records:</span>
+                                  <p className="text-sm font-medium text-[var(--foreground)]">{chunksPreview.total_records}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-[var(--secondary)]">Chunk Size:</span>
+                                  <p className="text-sm font-medium text-[var(--foreground)]">{chunksPreview.chunk_size}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-[var(--secondary)]">Number of Chunks:</span>
+                                  <p className="text-sm font-medium text-green-600 dark:text-green-400">{chunksPreview.number_of_chunks}</p>
+                                </div>
+                              </div>
+                              
+                              {/* Chunks List Preview */}
+                              <div className="mt-3 pt-3 border-t border-[var(--card-border)]">
+                                <p className="text-xs font-medium text-[var(--foreground)] mb-2">Chunks Distribution:</p>
+                                <div className="max-h-32 overflow-y-auto space-y-1">
+                                  {chunksPreview.chunks_preview.slice(0, 10).map((chunk: any) => (
+                                    <div key={chunk.chunk_number} className="text-xs text-[var(--secondary)] flex justify-between">
+                                      <span>{chunk.chunk_name}</span>
+                                      <span className="text-[var(--foreground)] font-medium">{chunk.records_count} records ({chunk.records_range})</span>
+                                    </div>
+                                  ))}
+                                  {chunksPreview.chunks_preview.length > 10 && (
+                                    <p className="text-xs text-[var(--secondary)] italic">
+                                      ... and {chunksPreview.chunks_preview.length - 10} more chunks
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Create Chunks Button */}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={async () => {
+                                  if (!createdCampaign) return;
+
+                                  setCreatingChunks(true);
+                                  try {
+                                    const response = await api.post('/chunk/create', {
+                                      campaign_id: createdCampaign.id,
+                                      chunk_size: chunkSize
+                                    });
+
+                                    if (response.ok) {
+                                      const result = await response.json();
+                                      alert(`Success! Created ${result.chunks_created} chunks for campaign.`);
+                                      
+                                      // Refresh campaigns list to show type='multiple'
+                                      fetchCampaigns();
+                                      
+                                      // Clear preview and reset
+                                      setChunksPreview(null);
+                                      setCreatedCampaign(null);
+                                      setChunkSize(25);
+                                    } else {
+                                      const errorData = await response.json();
+                                      alert(errorData.detail || 'Failed to create chunks');
+                                    }
+                                  } catch (error: any) {
+                                    console.error('Error creating chunks:', error);
+                                    alert(`Error: ${error.message || 'Failed to create chunks'}`);
+                                  } finally {
+                                    setCreatingChunks(false);
+                                  }
+                                }}
+                                disabled={creatingChunks}
+                                className="flex-1 px-6 py-3 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              >
+                                {creatingChunks ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Creating Chunks...
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    Create {chunksPreview.number_of_chunks} Chunks
+                                  </>
+                                )}
+                              </button>
+                              
+                              <button
+                                onClick={() => setChunksPreview(null)}
+                                className="px-4 py-2 border border-[var(--input-border)] rounded-md text-[var(--foreground)] hover:bg-[var(--table-row-hover)] transition-colors"
+                              >
+                                Change Size
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Reset Button */}
+                        {!chunksPreview && (
+                          <button
+                            onClick={() => {
+                              setCreatedCampaign(null);
+                              setChunkSize(25);
+                              setCampaignIdMessage(null);
+                            }}
+                            className="w-full px-6 py-2 bg-[var(--secondary)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium"
+                          >
+                            Create Another Campaign
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1706,53 +2347,6 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               </button>
             )}
 
-            {/* Upload Records Button */}
-            {selectedPhaseId && (
-              <button
-                onClick={() => {
-                  // Find campaigns for this phase
-                  const phaseCampaigns = campaigns.filter(c => c.phase_id === selectedPhaseId);
-                  const selectedPhase = phases.find(p => p.id === selectedPhaseId);
-                  
-                  if (phaseCampaigns.length === 0) {
-                    alert('No campaigns found for the selected phase. Please create a campaign first.');
-                    return;
-                  }
-                  
-                  // Prioritize campaigns that have been set in csvCampaignIds (set via "Set CID" button)
-                  let campaignToUse = null;
-                  
-                  if (csvCampaignIds.length > 0) {
-                    // Find the first campaign that is set in csvCampaignIds and belongs to this phase
-                    const setCampaigns = phaseCampaigns.filter(c => csvCampaignIds.includes(c.id));
-                    if (setCampaigns.length > 0) {
-                      campaignToUse = setCampaigns[0]; // Use the first set campaign
-                    }
-                  }
-                  
-                  // Fallback: use selectedCampaignId if set, otherwise use first campaign
-                  if (!campaignToUse) {
-                    campaignToUse = selectedCampaignId 
-                      ? phaseCampaigns.find(c => c.id === selectedCampaignId) || phaseCampaigns[0]
-                      : phaseCampaigns[0];
-                  }
-                  
-                  if (campaignToUse && selectedPhase) {
-                    setUploadRecordsModal({
-                      show: true,
-                      campaignId: campaignToUse.id,
-                      campaignName: campaignToUse.campaign_name || `Campaign ${campaignToUse.id}`,
-                      campaignCid: campaignToUse.cid || null,
-                      phaseName: selectedPhase.name
-                    });
-                  }
-                }}
-                disabled={!selectedPhaseId || campaigns.length === 0}
-                className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
-              >
-                Upload Records to Campaign
-              </button>
-            )}
             <div className="flex items-center gap-2 flex-1">
               <Search className="w-5 h-5 text-[var(--secondary)]" />
               <span className="text-sm font-medium text-[var(--foreground)]">Search:</span>
@@ -1937,86 +2531,505 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
         </div>
       )}
 
-      {/* Upload Records Confirmation Modal */}
-      {uploadRecordsModal.show && (
+      {/* Upsert Confirmation Modal */}
+      {upsertConfirmModal.show && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-[var(--foreground)]">Upload Records</h3>
+              <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Upsert Records</h3>
               <button
-                onClick={() => setUploadRecordsModal({ show: false, campaignId: null, campaignName: null, campaignCid: null, phaseName: null })}
+                onClick={() => {
+                  setUpsertConfirmModal({ show: false, campaignId: null, campaignName: null });
+                  setUpsertPreviewRecords([]);
+                }}
                 className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
-                disabled={uploadingRecords}
+                disabled={upserting}
               >
                 <X className="w-5 h-5 text-[var(--secondary)]" />
               </button>
             </div>
+            
             <div className="mb-6">
               <p className="text-sm text-[var(--foreground)] mb-4">
-                Upload records from data.csv to the following campaign:
+                You are about to upsert records from <strong>data.csv</strong> to campaign: <strong>{upsertConfirmModal.campaignName}</strong>
               </p>
-              <div className="p-4 bg-[var(--input-bg)] rounded-md border border-[var(--input-border)] space-y-2">
-                <div>
-                  <span className="text-xs text-[var(--secondary)]">Phase:</span>
-                  <p className="text-sm font-medium text-[var(--foreground)]">{uploadRecordsModal.phaseName || 'N/A'}</p>
+              
+              {loadingUpsertPreview ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-[var(--primary)]" />
+                  <span className="ml-2 text-sm text-[var(--secondary)]">Loading preview...</span>
                 </div>
-                <div>
-                  <span className="text-xs text-[var(--secondary)]">Campaign:</span>
-                  <p className="text-sm font-medium text-[var(--foreground)]">{uploadRecordsModal.campaignName || 'N/A'}</p>
+              ) : upsertPreviewRecords.length > 0 ? (
+                <div className="border border-[var(--card-border)] rounded-md overflow-hidden">
+                  <div className="bg-[var(--input-bg)] px-4 py-2 border-b border-[var(--card-border)]">
+                    <h4 className="text-sm font-semibold text-[var(--foreground)]">First 5 Records Preview:</h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-[var(--table-header-bg)]">
+                        <tr>
+                          {Object.keys(upsertPreviewRecords[0] || {}).map((key) => (
+                            <th key={key} className="px-3 py-2 text-left font-semibold text-[var(--foreground)] border-b border-[var(--card-border)]">
+                              {key}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {upsertPreviewRecords.map((record, idx) => (
+                          <tr key={idx} className={idx % 2 === 0 ? 'bg-[var(--card-bg)]' : 'bg-[var(--input-bg)]'}>
+                            {Object.values(record).map((value: any, colIdx) => (
+                              <td key={colIdx} className="px-3 py-2 text-[var(--foreground)] border-b border-[var(--card-border)]">
+                                {String(value || '')}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="bg-[var(--input-bg)] px-4 py-2 border-t border-[var(--card-border)] text-xs text-[var(--secondary)]">
+                    Showing first 5 records. All records with this campaign_id will be upserted.
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded-md text-sm">
+                  <p className="font-semibold mb-1">⚠️ No records found for this campaign</p>
+                  <p className="text-xs">Campaign ID: {upsertConfirmModal.campaignId}</p>
+                  <p className="text-xs mt-1">
+                    Make sure you've clicked "Set CID" button to set the campaign_id in data.csv before upserting.
+                  </p>
+                </div>
+              )}
             </div>
+            
             <div className="flex items-center gap-3 justify-end">
               <button
-                onClick={() => setUploadRecordsModal({ show: false, campaignId: null, campaignName: null, campaignCid: null, phaseName: null })}
-                disabled={uploadingRecords}
+                onClick={() => {
+                  setUpsertConfirmModal({ show: false, campaignId: null, campaignName: null });
+                  setUpsertPreviewRecords([]);
+                }}
+                disabled={upserting}
                 className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button
                 onClick={async () => {
-                  if (!uploadRecordsModal.campaignId) return;
+                  if (!upsertConfirmModal.campaignId) return;
                   
-                  setUploadingRecords(true);
+                  setUpserting(true);
                   try {
                     const response = await api.post('/campaign/upload-records', {
-                      campaign_id: uploadRecordsModal.campaignId,
+                      campaign_id: upsertConfirmModal.campaignId,
                     });
 
                     if (!response.ok) {
                       const errorData = await response.json();
                       const errorDetail = errorData.detail || errorData;
-                      alert(errorDetail.message || 'Failed to upload records');
+                      alert(errorDetail.message || 'Failed to upsert records');
                     } else {
                       const result = await response.json();
-                      alert(`Successfully uploaded ${result.records_uploaded || 0} records to ${result.campaign_name}`);
+                      alert(`Successfully upserted ${result.records_uploaded || 0} records to ${result.campaign_name}`);
                       // Close modal
-                      setUploadRecordsModal({ show: false, campaignId: null, campaignName: null, campaignCid: null, phaseName: null });
+                      setUpsertConfirmModal({ show: false, campaignId: null, campaignName: null });
+                      setUpsertPreviewRecords([]);
                       // Refresh campaigns to get updated record counts
                       if (selectedPhaseId) {
                         await refreshCampaigns();
                       }
                     }
                   } catch (error: any) {
-                    console.error('Error uploading records:', error);
-                    alert(`Error: ${error.message || 'Failed to upload records'}`);
+                    console.error('Error upserting records:', error);
+                    alert(`Error: ${error.message || 'Failed to upsert records'}`);
                   } finally {
-                    setUploadingRecords(false);
+                    setUpserting(false);
                   }
                 }}
-                disabled={uploadingRecords}
-                className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                disabled={upserting || loadingUpsertPreview || upsertPreviewRecords.length === 0}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {uploadingRecords ? (
+                {upserting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Uploading...
+                    Upserting...
                   </>
                 ) : (
-                  'Upload Records'
+                  <>
+                    <Upload className="w-4 h-4" />
+                    Confirm Upsert
+                  </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chunked Campaign Upsert Confirmation Modal */}
+      {chunkedUpsertModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Upsert Chunked Campaign</h3>
+              <button
+                onClick={() => {
+                  setChunkedUpsertModal({ show: false, campaignId: null, campaignName: null });
+                  setChunkedUpsertPreviews([]);
+                  setTotalChunksCount(0);
+                }}
+                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
+                disabled={upsertingChunks}
+              >
+                <X className="w-5 h-5 text-[var(--secondary)]" />
+              </button>
+            </div>
+            
+            {/* Action Buttons at Top */}
+            <div className="flex items-center gap-3 justify-end mb-4 pb-4 border-b border-[var(--card-border)]">
+              <button
+                onClick={() => {
+                  setChunkedUpsertModal({ show: false, campaignId: null, campaignName: null });
+                  setChunkedUpsertPreviews([]);
+                  setTotalChunksCount(0);
+                }}
+                disabled={upsertingChunks}
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!chunkedUpsertModal.campaignId) return;
+                  
+                  console.log('=== Starting Chunked Upsert ===');
+                  console.log('Campaign ID:', chunkedUpsertModal.campaignId);
+                  console.log('Total Chunks:', totalChunksCount);
+                  
+                  setUpsertingChunks(true);
+                  setChunkProgress({});
+                  
+                  try {
+                    // Fetch all chunks for this campaign
+                    const chunksResponse = await api.get(`/chunk/campaign/${chunkedUpsertModal.campaignId}`);
+                    if (!chunksResponse.ok) {
+                      throw new Error('Failed to fetch chunks');
+                    }
+                    
+                    const chunksData = await chunksResponse.json();
+                    const chunks = chunksData.chunks || [];
+                    
+                    if (chunks.length === 0) {
+                      alert('No chunks found for this campaign');
+                      setUpsertingChunks(false);
+                      return;
+                    }
+                    
+                    // Get chunk_size from first chunk's records_count (or use a default)
+                    const chunkSize = chunks[0].records_count || 25;
+                    console.log('Using chunk size:', chunkSize);
+                    
+                    let successCount = 0;
+                    let failedChunks: string[] = [];
+                    let totalRecords = 0;
+                    
+                    // Process each chunk sequentially
+                    for (let i = 0; i < chunks.length; i++) {
+                      const chunk = chunks[i];
+                      console.log(`\n--- Processing Chunk ${i + 1}/${chunks.length} ---`);
+                      console.log('Chunk Name:', chunk.chunk_name);
+                      console.log('Chunk ID:', chunk.id);
+                      console.log('Chunk Index:', i);
+                      console.log('Chunk Size:', chunkSize);
+                      
+                      // Update progress: creating
+                      setChunkProgress(prev => ({
+                        ...prev,
+                        [chunk.chunk_name]: {
+                          status: 'creating',
+                          message: `Processing chunk ${i + 1}/${chunks.length}...`,
+                        }
+                      }));
+                      
+                      try {
+                        // Call the new single chunk upsert endpoint
+                        const response = await api.post('/chunk/upsert-single', {
+                          chunk_id: chunk.id,
+                          chunk_index: i,
+                          chunk_size: chunkSize
+                        });
+                        
+                        if (response.ok) {
+                          const result = await response.json();
+                          successCount++;
+                          totalRecords += result.records_uploaded;
+                          
+                          console.log('✓ Chunk upserted successfully');
+                          console.log('Records uploaded:', result.records_uploaded);
+                          console.log('CID:', result.cid);
+                          
+                          // Update progress: finished
+                          setChunkProgress(prev => ({
+                            ...prev,
+                            [chunk.chunk_name]: {
+                              status: 'finished',
+                              message: `Uploaded ${result.records_uploaded} records to Millis.ai`,
+                              records_count: result.records_uploaded
+                            }
+                          }));
+                        } else {
+                          const errorData = await response.json();
+                          failedChunks.push(chunk.chunk_name);
+                          
+                          console.log('✗ Chunk upsert failed');
+                          console.log('Error:', errorData.detail);
+                          
+                          // Update progress: failed
+                          setChunkProgress(prev => ({
+                            ...prev,
+                            [chunk.chunk_name]: {
+                              status: 'failed',
+                              message: errorData.detail || 'Failed to upsert',
+                            }
+                          }));
+                        }
+                      } catch (error: any) {
+                        failedChunks.push(chunk.chunk_name);
+                        console.error('Error upserting chunk:', error);
+                        
+                        // Update progress: failed
+                        setChunkProgress(prev => ({
+                          ...prev,
+                          [chunk.chunk_name]: {
+                            status: 'failed',
+                            message: error.message || 'Failed to upsert',
+                          }
+                        }));
+                      }
+                    }
+                    
+                    console.log('\n=== Upsert Complete ===');
+                    console.log('Success:', successCount, '/', chunks.length);
+                    console.log('Total Records:', totalRecords);
+                    console.log('Failed Chunks:', failedChunks);
+                    
+                    // Show final message
+                    const message = failedChunks.length > 0
+                      ? `Successfully upserted ${successCount}/${chunks.length} chunks with ${totalRecords} records. Failed: ${failedChunks.join(', ')}`
+                      : `Successfully upserted all ${successCount} chunks with ${totalRecords} records to Millis.ai!`;
+                    
+                    alert(message);
+                    
+                    // Refresh campaigns
+                    if (selectedPhaseId) {
+                      await refreshCampaigns();
+                    }
+                    
+                  } catch (error: any) {
+                    console.error('Error during chunked upsert:', error);
+                    alert(`Error: ${error.message || 'Failed to upsert chunks'}`);
+                  } finally {
+                    setUpsertingChunks(false);
+                  }
+                }}
+                disabled={upsertingChunks || loadingChunkedPreviews || chunkedUpsertPreviews.length === 0}
+                className="px-4 py-2 bg-purple-600 text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {upsertingChunks ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Upserting All Chunks...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    Confirm Upsert All Chunks
+                  </>
+                )}
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <div className="p-3 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded-md text-sm mb-4">
+                <p className="font-semibold">📦 Chunked Campaign: {chunkedUpsertModal.campaignName}</p>
+                <p className="text-xs mt-1">You are about to upsert all {totalChunksCount} chunks of this campaign to Millis.ai. Below is a preview of first 2 records from each chunk.</p>
+              </div>
+              
+              {/* Chunks Preview Limit Slider */}
+              <div className="mb-4 p-3 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-md">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-[var(--foreground)]">
+                    Preview Limit: <span className="text-[var(--primary)]">{chunksPreviewLimit}</span> / {totalChunksCount} chunks
+                    {chunkedUpsertPreviews.length < chunksPreviewLimit && chunksPreviewLimit <= totalChunksCount && (
+                      <span className="ml-2 text-xs text-orange-600 dark:text-orange-400">(currently showing {chunkedUpsertPreviews.length})</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setChunksPreviewLimit(totalChunksCount)}
+                      className="text-xs px-2 py-1 bg-[var(--primary)] text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={chunksPreviewLimit === totalChunksCount || loadingChunkedPreviews || upsertingChunks}
+                    >
+                      Show All
+                    </button>
+                    {chunkedUpsertPreviews.length < chunksPreviewLimit && (
+                      <button
+                        onClick={async () => {
+                          if (!chunkedUpsertModal.campaignId) return;
+                          
+                          setLoadingChunkedPreviews(true);
+                          try {
+                            const chunksResponse = await api.get(`/chunk/campaign/${chunkedUpsertModal.campaignId}`);
+                            if (chunksResponse.ok) {
+                              const chunksData = await chunksResponse.json();
+                              const chunks = chunksData.chunks || [];
+                              
+                              const previewsPromises = chunks.slice(0, chunksPreviewLimit).map(async (chunk: any) => {
+                                try {
+                                  const previewResponse = await api.get(`/get_csv_preview?limit=2&campaign_id=${chunkedUpsertModal.campaignId}`);
+                                  if (previewResponse.ok) {
+                                    const previewData = await previewResponse.json();
+                                    return {
+                                      chunk_name: chunk.chunk_name,
+                                      chunk_id: chunk.id,
+                                      records: previewData.records || []
+                                    };
+                                  }
+                                } catch (error) {
+                                  console.error(`Error fetching preview for chunk ${chunk.chunk_name}:`, error);
+                                }
+                                return {
+                                  chunk_name: chunk.chunk_name,
+                                  chunk_id: chunk.id,
+                                  records: []
+                                };
+                              });
+                              
+                              const previews = await Promise.all(previewsPromises);
+                              setChunkedUpsertPreviews(previews);
+                            }
+                          } catch (error) {
+                            console.error('Error fetching chunk previews:', error);
+                          } finally {
+                            setLoadingChunkedPreviews(false);
+                          }
+                        }}
+                        className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        disabled={loadingChunkedPreviews || upsertingChunks}
+                      >
+                        {loadingChunkedPreviews ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Loading...
+                          </>
+                        ) : (
+                          'Load More'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max={totalChunksCount || 10}
+                  value={chunksPreviewLimit}
+                  onChange={(e) => setChunksPreviewLimit(parseInt(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                  disabled={loadingChunkedPreviews || upsertingChunks}
+                />
+                <div className="flex justify-between text-xs text-[var(--secondary)] mt-1">
+                  <span>1</span>
+                  <span>{totalChunksCount}</span>
+                </div>
+              </div>
+              
+              {loadingChunkedPreviews ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-[var(--primary)]" />
+                  <span className="ml-2 text-sm text-[var(--secondary)]">Loading chunk previews...</span>
+                </div>
+              ) : chunkedUpsertPreviews.length > 0 ? (
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                  {chunkedUpsertPreviews.map((preview, idx) => {
+                    const progress = chunkProgress[preview.chunk_name];
+                    const isProcessing = progress && ['creating', 'upserting'].includes(progress.status);
+                    const isFinished = progress && progress.status === 'finished';
+                    const isFailed = progress && progress.status === 'failed';
+                    
+                    return (
+                    <div key={idx} className={`border rounded-md overflow-hidden ${
+                      isFinished ? 'border-green-500' : isFailed ? 'border-red-500' : isProcessing ? 'border-yellow-500' : 'border-[var(--card-border)]'
+                    }`}>
+                      <div className={`px-4 py-2 border-b border-[var(--card-border)] flex items-center justify-between ${
+                        isFinished ? 'bg-green-50 dark:bg-green-900/20' : 
+                        isFailed ? 'bg-red-50 dark:bg-red-900/20' : 
+                        isProcessing ? 'bg-yellow-50 dark:bg-yellow-900/20' :
+                        'bg-purple-50 dark:bg-purple-900/20'
+                      }`}>
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] flex items-center gap-2">
+                          {preview.chunk_name}
+                          {!progress && (
+                            <span className="text-xs text-[var(--secondary)]">({preview.records.length} records preview)</span>
+                          )}
+                          {progress && (
+                            <span className={`text-xs font-normal ${
+                              isFinished ? 'text-green-600 dark:text-green-400' :
+                              isFailed ? 'text-red-600 dark:text-red-400' :
+                              isProcessing ? 'text-yellow-600 dark:text-yellow-400' :
+                              'text-[var(--secondary)]'
+                            }`}>
+                              {isProcessing && <Loader2 className="w-3 h-3 inline animate-spin mr-1" />}
+                              {isFinished && '✓ '}
+                              {isFailed && '✗ '}
+                              {progress.message}
+                            </span>
+                          )}
+                        </h4>
+                      </div>
+                      {!upsertingChunks && preview.records.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead className="bg-[var(--table-header-bg)]">
+                              <tr>
+                                {Object.keys(preview.records[0] || {}).map((key) => (
+                                  <th key={key} className="px-3 py-2 text-left font-semibold text-[var(--foreground)] border-b border-[var(--card-border)]">
+                                    {key}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {preview.records.map((record: any, recordIdx: number) => (
+                                <tr key={recordIdx} className={recordIdx % 2 === 0 ? 'bg-[var(--card-bg)]' : 'bg-[var(--input-bg)]'}>
+                                  {Object.values(record).map((value: any, colIdx) => (
+                                    <td key={colIdx} className="px-3 py-2 text-[var(--foreground)] border-b border-[var(--card-border)]">
+                                      {String(value || '')}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : !upsertingChunks ? (
+                        <div className="p-4 text-sm text-[var(--secondary)]">No records found for this chunk</div>
+                      ) : null}
+                    </div>
+                    );
+                  })}
+                  {totalChunksCount > 10 && (
+                    <p className="text-xs text-[var(--secondary)] italic mt-4">
+                      📝 Showing first 10 of {totalChunksCount} chunks. All {totalChunksCount} chunks will be upserted when you confirm.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded-md text-sm">
+                  <p className="font-semibold mb-1">⚠️ No chunks found for this campaign</p>
+                  <p className="text-xs">Please create chunks first before upserting.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2367,6 +3380,386 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Create Chunks Modal */}
+      {showCreateChunksModal.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+          <div className="bg-[var(--card-bg)] rounded-lg shadow-xl w-full max-w-2xl mx-4 border border-[var(--card-border)]">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-[var(--card-border)]">
+              <h2 className="text-lg font-semibold text-[var(--foreground)]">Create Campaign Chunks</h2>
+              <button
+                onClick={() => {
+                  setShowCreateChunksModal({ show: false, campaignId: null, campaignName: '' });
+                  setChunksPreview(null);
+                }}
+                className="p-1 rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
+              >
+                <X className="w-5 h-5 text-[var(--foreground)]" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                  Campaign Name
+                </label>
+                <input
+                  type="text"
+                  value={showCreateChunksModal.campaignName}
+                  disabled
+                  className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] opacity-60 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                  Chunk Size (records per chunk)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={chunkSize}
+                    onChange={(e) => setChunkSize(parseInt(e.target.value) || 1)}
+                    className="flex-1 px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!showCreateChunksModal.campaignId) return;
+                      setCalculatingChunks(true);
+                      try {
+                        const response = await api.post('/chunk/calculate', {
+                          campaign_id: showCreateChunksModal.campaignId,
+                          chunk_size: chunkSize
+                        });
+                        if (response.ok) {
+                          const result = await response.json();
+                          setChunksPreview(result);
+                        } else {
+                          const errorData = await response.json();
+                          alert(errorData.detail || 'Failed to calculate chunks');
+                        }
+                      } catch (error: any) {
+                        console.error('Error calculating chunks:', error);
+                        alert(`Error: ${error.message || 'Failed to calculate chunks'}`);
+                      } finally {
+                        setCalculatingChunks(false);
+                      }
+                    }}
+                    disabled={calculatingChunks}
+                    className="px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {calculatingChunks ? 'Calculating...' : 'Calculate'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview */}
+              {chunksPreview && (
+                <div className="p-4 bg-[var(--table-header-bg)] rounded-md border border-[var(--card-border)]">
+                  <h3 className="text-sm font-semibold text-[var(--foreground)] mb-2">📊 Preview:</h3>
+                  <div className="space-y-1 text-sm text-[var(--foreground)]">
+                    <p>• Total Records: <span className="font-bold">{chunksPreview.total_records}</span></p>
+                    <p>• Chunk Size: <span className="font-bold">{chunksPreview.chunk_size}</span></p>
+                    <p>• Number of Chunks: <span className="font-bold">{chunksPreview.number_of_chunks}</span></p>
+                    <div className="mt-2 max-h-32 overflow-y-auto">
+                      {chunksPreview.chunks_preview.slice(0, 5).map((chunk: any) => (
+                        <p key={chunk.chunk_number} className="text-xs">
+                          Chunk {chunk.chunk_number}: {chunk.records_count} records ({chunk.records_range})
+                        </p>
+                      ))}
+                      {chunksPreview.chunks_preview.length > 5 && (
+                        <p className="text-xs text-[var(--secondary)]">... and {chunksPreview.chunks_preview.length - 5} more</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 p-4 border-t border-[var(--card-border)]">
+              <button
+                onClick={() => {
+                  setShowCreateChunksModal({ show: false, campaignId: null, campaignName: '' });
+                  setChunksPreview(null);
+                }}
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md text-[var(--foreground)] hover:bg-[var(--table-row-hover)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!showCreateChunksModal.campaignId || !chunksPreview) {
+                    alert('Please calculate chunks first');
+                    return;
+                  }
+                  setCreatingChunks(true);
+                  try {
+                    const response = await api.post('/chunk/create', {
+                      campaign_id: showCreateChunksModal.campaignId,
+                      chunk_size: chunkSize
+                    });
+                    if (response.ok) {
+                      const result = await response.json();
+                      alert(result.message || 'Chunks created successfully!');
+                      setShowCreateChunksModal({ show: false, campaignId: null, campaignName: '' });
+                      setChunksPreview(null);
+                      // Refresh campaigns to update type
+                      fetchCampaigns();
+                    } else {
+                      const errorData = await response.json();
+                      alert(errorData.detail || 'Failed to create chunks');
+                    }
+                  } catch (error: any) {
+                    console.error('Error creating chunks:', error);
+                    alert(`Error: ${error.message || 'Failed to create chunks'}`);
+                  } finally {
+                    setCreatingChunks(false);
+                  }
+                }}
+                disabled={creatingChunks || !chunksPreview}
+                className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {creatingChunks ? 'Creating...' : 'Create Chunks'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Show Chunks Modal */}
+      {showChunksModal.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+          <div className="bg-[var(--card-bg)] rounded-lg shadow-xl w-full max-w-4xl mx-4 h-[80vh] flex flex-col border border-[var(--card-border)]">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-[var(--card-border)]">
+              <h2 className="text-lg font-semibold text-[var(--foreground)]">
+                Chunks - {showChunksModal.campaignName}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowChunksModal({ show: false, campaignId: null, campaignName: '' });
+                  setChunks([]);
+                }}
+                className="p-1 rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
+              >
+                <X className="w-5 h-5 text-[var(--foreground)]" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-4">
+              {loadingChunks ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)]" />
+                </div>
+              ) : chunks.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-[var(--secondary)]">No chunks found</p>
+                </div>
+              ) : (
+                <table className="w-full border-collapse">
+                  <thead className="bg-[var(--table-header-bg)] sticky top-0">
+                    <tr>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">#</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Chunk Name</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">CID</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Status</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Records</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Upload Status</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Phone ID</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Agent ID</th>
+                      <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chunks.map((chunk, index) => (
+                      <tr key={chunk.id} className="hover:bg-[var(--table-row-hover)] transition-colors">
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {index + 1}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.chunk_name}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.cid || 'N/A'}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            chunk.status === 'finished' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                            chunk.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                            'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          }`}>
+                            {chunk.status || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.records_count > 0 ? (
+                            <span>{chunk.records_count}</span>
+                          ) : (
+                            <span className="text-gray-400 italic">Not upserted</span>
+                          )}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.upload_status === 'done' ? (
+                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 rounded text-xs font-medium">
+                              ✓ Done
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded text-xs font-medium">
+                              Pending
+                            </span>
+                          )}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.phone_id ? (
+                            <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400 rounded text-xs font-medium">
+                              {chunk.phone_id}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--secondary)]">N/A</span>
+                          )}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.agent_id || <span className="text-[var(--secondary)]">N/A</span>}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          <button
+                            onClick={async () => {
+                              if (!confirm(`Are you sure you want to delete chunk "${chunk.chunk_name}"? This will also delete it from Millis.ai if it has a CID.`)) {
+                                return;
+                              }
+                              
+                              try {
+                                const response = await api.delete(`/chunk/${chunk.id}`);
+                                if (response.ok) {
+                                  alert(`Successfully deleted chunk: ${chunk.chunk_name}`);
+                                  // Refresh chunks list
+                                  if (showChunksModal.campaignId) {
+                                    const chunksResponse = await api.get(`/chunk/campaign/${showChunksModal.campaignId}`);
+                                    if (chunksResponse.ok) {
+                                      const result = await chunksResponse.json();
+                                      setChunks(result.chunks || []);
+                                    }
+                                  }
+                                } else {
+                                  const errorData = await response.json();
+                                  alert(errorData.detail || 'Failed to delete chunk');
+                                }
+                              } catch (error: any) {
+                                console.error('Error deleting chunk:', error);
+                                alert(`Error: ${error.message || 'Failed to delete chunk'}`);
+                              }
+                            }}
+                            className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                            title="Delete this chunk"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-[var(--card-border)] flex items-center justify-between">
+              <p className="text-sm text-[var(--secondary)]">
+                Total Chunks: {chunks.length}
+              </p>
+              <button
+                onClick={() => {
+                  setShowChunksModal({ show: false, campaignId: null, campaignName: '' });
+                  setChunks([]);
+                }}
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md text-[var(--foreground)] hover:bg-[var(--table-row-hover)] transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chunk Upsert Warning Modal */}
+      {chunkWarningModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-[var(--card-border)] bg-yellow-50 dark:bg-yellow-900/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-yellow-100 dark:bg-yellow-900/40 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-yellow-800 dark:text-yellow-400">
+                    ⚠️ Chunks Not Upserted
+                  </h2>
+                  <p className="text-sm text-yellow-700 dark:text-yellow-500">
+                    Please upload records to chunks before setting phone number
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+              <div className="space-y-4">
+                <p className="text-sm text-[var(--foreground)]">
+                  The following chunks need to have records uploaded before you can set a phone number:
+                </p>
+                
+                <div className="bg-[var(--input-bg)] border border-[var(--input-border)] rounded-md p-4 max-h-64 overflow-y-auto">
+                  <div className="space-y-2">
+                    {chunkWarningModal.chunkNames.map((chunkName, index) => (
+                      <div key={index} className="flex items-center gap-2 text-sm">
+                        <span className="w-6 h-6 rounded-full bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 flex items-center justify-center text-xs font-medium flex-shrink-0">
+                          {index + 1}
+                        </span>
+                        <span className="text-[var(--foreground)] font-mono">{chunkName}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4">
+                  <div className="flex gap-3">
+                    <svg className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="text-sm">
+                      <p className="font-medium text-blue-800 dark:text-blue-300 mb-1">How to upload records:</p>
+                      <ol className="list-decimal list-inside space-y-1 text-blue-700 dark:text-blue-400">
+                        <li>Click "Upsert" button on your campaign</li>
+                        <li>Click "Confirm Upsert All Chunks" to upload records to all chunks</li>
+                        <li>Wait for all chunks to complete uploading</li>
+                        <li>Then you can set the phone number</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-[var(--card-border)] flex justify-end gap-3">
+              <button
+                onClick={() => setChunkWarningModal({ show: false, chunkNames: [] })}
+                className="px-6 py-2 bg-[var(--primary)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
+              >
+                Got it
+              </button>
+            </div>
           </div>
         </div>
       )}

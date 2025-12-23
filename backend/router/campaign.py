@@ -69,12 +69,13 @@ def create_campaign(
     Returns:
         CreateCampaignResponse with created campaign details
     """
-    logger.info(f"Creating new campaign for phase_id: {request.phase_id}, phase_name: {request.phase_name}")
+    logger.info(f"Creating new campaign for phase_id: {request.phase_id}, phase_name: {request.phase_name}, type: {request.campaign_type}")
     
     success, error_msg, campaign_data = create_campaign_service(
         db,
         request.phase_id,
-        request.phase_name
+        request.phase_name,
+        request.campaign_type
     )
     
     if not success:
@@ -94,6 +95,7 @@ def create_campaign(
         status=campaign_data['status'],
         record_count=campaign_data['record_count'],
         phase_id=campaign_data['phase_id'],
+        type=campaign_data.get('type', 'single'),
         message=f"Successfully created campaign: {campaign_data['campaign_name']}"
     )
 
@@ -348,7 +350,7 @@ def set_caller_endpoint(request: SetCallerRequest, db: DB_DEPENDENCY = None):
     """
     logger.info(f"Setting caller {request.phone_id} for campaign {request.campaign_id}")
     
-    success, error_msg, agent_id = set_caller_service(db, request.campaign_id, request.phone_id)
+    success, error_msg, result_data = set_caller_service(db, request.campaign_id, request.phone_id)
     
     if not success:
         raise HTTPException(
@@ -360,9 +362,19 @@ def set_caller_endpoint(request: SetCallerRequest, db: DB_DEPENDENCY = None):
             }
         )
     
+    agent_id = result_data.get('agent_id') if result_data else None
+    chunks_updated = result_data.get('chunks_updated') if result_data else None
+    total_chunks = result_data.get('total_chunks') if result_data else None
+    
+    # Create a more detailed message for multiple-type campaigns
+    if chunks_updated is not None and total_chunks is not None:
+        message = f"Successfully set caller {request.phone_id} for all {chunks_updated} chunks of the campaign"
+    else:
+        message = f"Successfully set caller {request.phone_id} for campaign"
+    
     return SetCallerResponse(
         success=True,
-        message=f"Successfully set caller {request.phone_id} for campaign",
+        message=message,
         agent_id=agent_id
     )
 

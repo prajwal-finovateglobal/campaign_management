@@ -7,6 +7,7 @@ from router.csv import router as csv_router
 from router.client import router as client_router
 from router.phase import router as phase_router
 from router.campaign import router as campaign_router
+from router.chunk import router as chunk_router
 from router.disposition import router as disposition_router
 from router.auth import router as auth_router, is_session_valid
 
@@ -99,6 +100,7 @@ app.include_router(csv_router)
 app.include_router(client_router)
 app.include_router(phase_router)
 app.include_router(campaign_router)
+app.include_router(chunk_router)
 app.include_router(disposition_router)
 
 @app.get("/")

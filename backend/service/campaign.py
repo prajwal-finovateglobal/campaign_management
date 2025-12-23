@@ -26,6 +26,20 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
         # Use DB data first (records_count and status from DB)
         record_count = campaign.records_count if campaign.records_count is not None else None
         status = campaign.status if campaign.status else None
+        campaign_type = campaign.type if campaign.type else 'single'
+        
+        # For multiple-type campaigns, calculate record_count as sum of chunks
+        if campaign_type == 'multiple':
+            from models.client import Chunk
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign.id).all()
+            if chunks:
+                # Sum all chunks' records_count
+                chunk_records_sum = sum(chunk.records_count for chunk in chunks if chunk.records_count is not None)
+                record_count = chunk_records_sum
+                logger.debug(f"Campaign {campaign.id} (multiple): calculated record_count={record_count} from {len(chunks)} chunks")
+            else:
+                record_count = 0
+                logger.debug(f"Campaign {campaign.id} (multiple): no chunks found, record_count=0")
         
         campaign_dict = {
             'id': campaign.id,
@@ -36,13 +50,14 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
             'cid': campaign.cid,
             'phone_id': campaign.phone_id,
             'agent_id': campaign.agent_id,
-            'record_count': record_count,  # Use DB value first
+            'type': campaign_type,  # Campaign type (single/multiple)
+            'record_count': record_count,  # Use DB value first, or sum of chunks for multiple type
             'status': status  # Use DB value first
         }
         campaigns.append(campaign_dict)
         
-        # Only fetch from Millis.ai if records_count is null or not set
-        if campaign.cid and record_count is None:
+        # Only fetch from Millis.ai if records_count is null or not set (and not multiple type)
+        if campaign.cid and record_count is None and campaign_type != 'multiple':
             cids_to_fetch.append(campaign.cid)
             logger.debug(f"Campaign {campaign.id} (cid: {campaign.cid}) has null records_count, will fetch from Millis.ai")
     
@@ -100,20 +115,21 @@ def generate_campaign_name(phase_name: str, phase_id: int, db: DB_DEPENDENCY) ->
 def create_campaign_service(
     db: DB_DEPENDENCY,
     phase_id: int,
-    phase_name: str
+    phase_name: str,
+    campaign_type: str = 'single'
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Create a new campaign for a phase.
     
     Process:
-    1. Generate campaign name based on phase name and existing campaign count
-    2. Create campaign in Millis.ai API
-    3. Store campaign details in database
+    - For 'single' type: Generate name, create in Millis.ai API, store in database
+    - For 'multiple' type: Generate name, store in database only (virtual campaign for chunks)
     
     Args:
         db: Database session
         phase_id: Phase ID to create campaign for
         phase_name: Name of the phase
+        campaign_type: Type of campaign - 'single' (default) or 'multiple'
     
     Returns:
         Tuple of (success, error_message, campaign_data)
@@ -121,7 +137,7 @@ def create_campaign_service(
         - error_message: Error message if failed, None if succeeded
         - campaign_data: Dict with created campaign details if succeeded, None if failed
     """
-    logger.info(f"Creating new campaign for phase_id: {phase_id}, phase_name: {phase_name}")
+    logger.info(f"Creating new campaign for phase_id: {phase_id}, phase_name: {phase_name}, type: {campaign_type}")
     
     try:
         # Verify phase exists
@@ -134,56 +150,90 @@ def create_campaign_service(
         # Generate campaign name
         campaign_name = generate_campaign_name(phase_name, phase_id, db)
         
-        # Create campaign in Millis.ai API
-        millis_success, millis_error, millis_data = create_campaign_in_millis(campaign_name)
-        if not millis_success:
-            logger.error(f"Failed to create campaign in Millis.ai: {millis_error}")
-            return False, millis_error, None
+        if campaign_type == 'multiple':
+            # For multiple type, create virtual campaign in DB only (no Millis.ai call)
+            logger.info(f"Creating virtual campaign (multiple type) for chunking: {campaign_name}")
+            
+            new_campaign = Campaign(
+                campaign_name=campaign_name,
+                phase_id=phase_id,
+                cid=None,  # No CID - chunks will have individual CIDs
+                status='pending',  # Virtual campaign status
+                records_count=None,  # Will be sum of chunks
+                type='single',  # Start as single, will be set to multiple when chunks are created
+                upsert_time=datetime.now(),
+                created_at=datetime.now()
+            )
+            
+            db.add(new_campaign)
+            db.commit()
+            db.refresh(new_campaign)
+            
+            logger.info(f"Successfully created virtual campaign: {campaign_name} (id: {new_campaign.id})")
+            
+            return True, None, {
+                'id': new_campaign.id,
+                'campaign_name': new_campaign.campaign_name,
+                'cid': None,
+                'status': new_campaign.status,
+                'record_count': 0,
+                'phase_id': new_campaign.phase_id,
+                'type': 'single'  # Will change to multiple when chunks are created
+            }
         
-        # Extract data from Millis.ai response
-        millis_cid = millis_data.get("id")  # This is the campaign ID from Millis.ai
-        millis_name = millis_data.get("name")
-        millis_status = millis_data.get("status")
-        millis_records = millis_data.get("records", [])
-        record_count = len(millis_records) if millis_records else 0
-        millis_created_at = millis_data.get("created_at")
-        
-        # Convert created_at timestamp to datetime if available
-        created_at_dt = None
-        if millis_created_at:
-            try:
-                # Millis.ai returns Unix timestamp (seconds)
-                created_at_dt = datetime.fromtimestamp(millis_created_at)
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Could not parse created_at timestamp {millis_created_at}: {e}")
-        
-        # Create campaign record in database
-        new_campaign = Campaign(
-            campaign_name=millis_name,
-            phase_id=phase_id,
-            cid=millis_cid,
-            status=millis_status,  # Save status from Millis.ai
-            records_count=record_count,  # Save record count from Millis.ai
-            upsert_time=datetime.now(),
-            created_at=created_at_dt if created_at_dt else datetime.now()
-        )
-        
-        db.add(new_campaign)
-        db.commit()
-        db.refresh(new_campaign)
-        
-        logger.info(f"Successfully created campaign: {millis_name} (id: {new_campaign.id}, cid: {millis_cid})")
-        
-        return True, None, {
-            'id': new_campaign.id,
-            'campaign_name': new_campaign.campaign_name,
-            'phase_id': new_campaign.phase_id,
-            'cid': new_campaign.cid,
-            'status': millis_status,
-            'record_count': record_count,
-            'upsert_time': new_campaign.upsert_time.isoformat() if new_campaign.upsert_time else None,
-            'created_at': new_campaign.created_at.isoformat() if new_campaign.created_at else None
-        }
+        else:
+            # For single type, create in Millis.ai API
+            millis_success, millis_error, millis_data = create_campaign_in_millis(campaign_name)
+            if not millis_success:
+                logger.error(f"Failed to create campaign in Millis.ai: {millis_error}")
+                return False, millis_error, None
+            
+            # Extract data from Millis.ai response
+            millis_cid = millis_data.get("id")  # This is the campaign ID from Millis.ai
+            millis_name = millis_data.get("name")
+            millis_status = millis_data.get("status")
+            millis_records = millis_data.get("records", [])
+            record_count = len(millis_records) if millis_records else 0
+            millis_created_at = millis_data.get("created_at")
+            
+            # Convert created_at timestamp to datetime if available
+            created_at_dt = None
+            if millis_created_at:
+                try:
+                    # Millis.ai returns Unix timestamp (seconds)
+                    created_at_dt = datetime.fromtimestamp(millis_created_at)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not parse created_at timestamp {millis_created_at}: {e}")
+            
+            # Create campaign record in database
+            new_campaign = Campaign(
+                campaign_name=millis_name,
+                phase_id=phase_id,
+                cid=millis_cid,
+                status=millis_status,  # Save status from Millis.ai
+                records_count=record_count,  # Save record count from Millis.ai
+                type='single',
+                upsert_time=datetime.now(),
+                created_at=created_at_dt if created_at_dt else datetime.now()
+            )
+            
+            db.add(new_campaign)
+            db.commit()
+            db.refresh(new_campaign)
+            
+            logger.info(f"Successfully created campaign: {millis_name} (id: {new_campaign.id}, cid: {millis_cid})")
+            
+            return True, None, {
+                'id': new_campaign.id,
+                'campaign_name': new_campaign.campaign_name,
+                'phase_id': new_campaign.phase_id,
+                'cid': new_campaign.cid,
+                'status': millis_status,
+                'record_count': record_count,
+                'type': 'single',
+                'upsert_time': new_campaign.upsert_time.isoformat() if new_campaign.upsert_time else None,
+                'created_at': new_campaign.created_at.isoformat() if new_campaign.created_at else None
+            }
         
     except Exception as e:
         db.rollback()
@@ -194,13 +244,13 @@ def create_campaign_service(
 
 def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
-    Refresh campaign status from Millis.ai API and update database.
-    Uses /campaigns/{cid}/info endpoint for faster status updates.
+    Refresh campaign status and record count from Millis.ai API and update database.
+    Uses /campaigns/{cid} endpoint to fetch both status and record count.
     
     Process:
     1. Get campaign from database by campaign_id
-    2. Fetch latest status from Millis.ai API using /campaigns/{cid}/info endpoint
-    3. Update campaign status in database
+    2. Fetch latest status and record count from Millis.ai API
+    3. Update campaign status and record count in database
     
     Args:
         db: Database session
@@ -212,7 +262,7 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         - error_message: Error message if failed, None if succeeded
         - campaign_data: Dict with updated campaign details if succeeded, None if failed
     """
-    logger.info(f"Refreshing campaign status for campaign_id: {campaign_id}")
+    logger.info(f"Refreshing campaign status and record count for campaign_id: {campaign_id}")
     
     try:
         # Get campaign from database
@@ -227,28 +277,32 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             logger.error(error_msg)
             return False, error_msg, None
         
-        # Fetch latest campaign status from Millis.ai using /info endpoint (faster)
-        from service.millis_api import get_campaign_info
-        millis_success, millis_error, millis_info = get_campaign_info(campaign.cid)
+        # Fetch full campaign data to get both status AND record count
+        from service.millis_api import get_campaign_details
         
-        if not millis_success or not millis_info:
-            error_msg = millis_error or f"Campaign {campaign.cid} not found in Millis.ai"
+        millis_campaigns = get_campaign_details([campaign.cid])
+        
+        if not millis_campaigns or campaign.cid not in millis_campaigns:
+            error_msg = f"Campaign {campaign.cid} not found in Millis.ai"
             logger.warning(error_msg)
             return False, error_msg, None
         
-        new_status = millis_info.get('status')
+        millis_data = millis_campaigns[campaign.cid]
+        new_status = millis_data.get('status')
+        new_record_count = millis_data.get('record_count', 0)
         
         if not new_status:
             error_msg = "Status not found in Millis.ai response"
             logger.error(error_msg)
             return False, error_msg, None
         
-        # Update campaign status in database (keep existing records_count)
+        # Update campaign status AND record count in database
         try:
             campaign.status = new_status
+            campaign.records_count = new_record_count
             db.commit()
             db.refresh(campaign)
-            logger.info(f"Campaign {campaign_id} (cid: {campaign.cid}) status updated in DB: status={new_status}")
+            logger.info(f"Campaign {campaign_id} (cid: {campaign.cid}) updated in DB: status={new_status}, records_count={new_record_count}")
         except Exception as e:
             db.rollback()
             logger.error(f"Error updating campaign {campaign_id} in database: {e}")
@@ -260,7 +314,7 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             'cid': campaign.cid,
             'status': new_status,
             'phase_id': campaign.phase_id,
-            'record_count': campaign.records_count  # Keep existing record_count from DB
+            'record_count': new_record_count
         }
         
     except Exception as e:
@@ -271,14 +325,14 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
 
 def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = None) -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
     """
-    Refresh status for all campaigns (optionally filtered by phase_id) from Millis.ai API.
-    Uses /campaigns/{cid}/info endpoint for faster status updates.
+    Refresh status and record count for all campaigns (optionally filtered by phase_id) from Millis.ai API.
+    Uses /campaigns/{cid} endpoint to fetch both status and record count.
     
     Process:
     1. Get all campaigns from database (optionally filtered by phase_id)
-    2. Fetch latest status from Millis.ai API using /campaigns/{cid}/info endpoint for each campaign
-    3. Update campaign status in database
-    4. Return updated campaign data with new statuses
+    2. Fetch latest status and record count from Millis.ai API for each campaign
+    3. Update campaign status and record count in database
+    4. Return updated campaign data with new statuses and record counts
     
     Args:
         db: Database session
@@ -290,7 +344,7 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
         - error_message: Error message if failed, None if succeeded
         - campaigns_data: List of updated campaign dictionaries if succeeded, None if failed
     """
-    logger.info(f"Refreshing status for all campaigns (phase_id: {phase_id}) using /info endpoint")
+    logger.info(f"Refreshing status and record count for all campaigns (phase_id: {phase_id})")
     
     try:
         # Get campaigns from database
@@ -307,6 +361,20 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
         updated_count = 0
         
         for campaign in result:
+            campaign_type = campaign.type if campaign.type else 'single'
+            record_count = campaign.records_count
+            
+            # For multiple-type campaigns, calculate record_count as sum of chunks
+            if campaign_type == 'multiple':
+                from models.client import Chunk
+                chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign.id).all()
+                if chunks:
+                    chunk_records_sum = sum(chunk.records_count for chunk in chunks if chunk.records_count is not None)
+                    record_count = chunk_records_sum
+                    logger.debug(f"Campaign {campaign.id} (multiple): calculated record_count={record_count} from {len(chunks)} chunks")
+                else:
+                    record_count = 0
+            
             campaign_dict = {
                 'id': campaign.id,
                 'campaign_name': campaign.campaign_name,
@@ -316,44 +384,56 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
                 'cid': campaign.cid,
                 'phone_id': campaign.phone_id,
                 'agent_id': campaign.agent_id,
-                'record_count': campaign.records_count,  # Keep existing record_count from DB
-                'status': campaign.status  # Will be updated if fetch succeeds
+                'type': campaign_type,
+                'record_count': record_count,  # Will be updated from Millis if fetch succeeds (only for single type)
+                'status': campaign.status  # Will be updated from Millis if fetch succeeds
             }
             
-            if campaign.cid:
-                # Fetch status using /info endpoint
-                millis_success, millis_error, millis_info = get_campaign_info(campaign.cid)
+            # Only refresh from Millis.ai for single-type campaigns
+            if campaign.cid and campaign_type != 'multiple':
+                # Fetch full campaign data to get both status AND record count
+                from service.millis_api import get_campaign_details
+                millis_campaigns = get_campaign_details([campaign.cid])
                 
-                if millis_success and millis_info:
-                    new_status = millis_info.get('status')
+                if millis_campaigns and campaign.cid in millis_campaigns:
+                    millis_data = millis_campaigns[campaign.cid]
+                    new_status = millis_data.get('status')
+                    new_record_count = millis_data.get('record_count', 0)
+                    
                     if new_status:
-                        # Update campaign status in database
+                        # Update campaign status AND record count in database
                         try:
                             campaign.status = new_status
+                            campaign.records_count = new_record_count
                             campaign_dict['status'] = new_status
+                            campaign_dict['record_count'] = new_record_count
                             updated_count += 1
                         except Exception as e:
                             logger.error(f"Error updating campaign {campaign.id} in database: {e}")
                             campaign_dict['status'] = campaign.status or 'unknown'
+                            campaign_dict['record_count'] = campaign.records_count
                     else:
                         campaign_dict['status'] = campaign.status or 'unknown'
+                        campaign_dict['record_count'] = campaign.records_count if campaign_type != 'multiple' else record_count
                 else:
-                    logger.warning(f"Failed to fetch status for campaign {campaign.id} (cid: {campaign.cid}): {millis_error}")
+                    logger.warning(f"Failed to fetch data for campaign {campaign.id} (cid: {campaign.cid})")
                     campaign_dict['status'] = campaign.status or 'unknown'
+                    campaign_dict['record_count'] = campaign.records_count if campaign_type != 'multiple' else record_count
             else:
                 campaign_dict['status'] = campaign.status or 'unknown'
+                campaign_dict['record_count'] = campaign.records_count if campaign_type != 'multiple' else record_count
             
             updated_campaigns.append(campaign_dict)
         
         # Commit all database updates
         try:
             db.commit()
-            logger.info(f"Successfully updated status for {updated_count} campaigns in database")
+            logger.info(f"Successfully updated status and record count for {updated_count} campaigns in database")
         except Exception as e:
             db.rollback()
             logger.error(f"Error committing campaign updates to database: {e}")
         
-        logger.info(f"Successfully refreshed status for {len(updated_campaigns)} campaigns")
+        logger.info(f"Successfully refreshed status and record count for {len(updated_campaigns)} campaigns")
         return True, None, updated_campaigns
         
     except Exception as e:
@@ -365,11 +445,17 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
 def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
     """
     Delete a campaign from both Millis.ai API and database.
+    For multiple-type campaigns, deletes all chunks and their Millis.ai campaigns.
     
     Process:
     1. Get campaign from database by campaign_id
-    2. Delete campaign from Millis.ai API using campaign CID
-    3. Delete campaign from database
+    2. If campaign is 'multiple' type:
+       - Get all chunks
+       - Delete each chunk's campaign from Millis.ai
+       - Delete all chunks from database
+    3. If campaign is 'single' type:
+       - Delete campaign from Millis.ai API using campaign CID
+    4. Delete campaign from database
     
     Args:
         db: Database session
@@ -392,16 +478,45 @@ def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         
         campaign_cid = campaign.cid
         campaign_name = campaign.campaign_name
+        campaign_type = campaign.type if campaign.type else 'single'
         
-        # Delete campaign from Millis.ai if CID exists
-        if campaign_cid:
-            millis_success, millis_error = delete_campaign_in_millis(campaign_cid)
-            if not millis_success:
-                logger.warning(f"Failed to delete campaign from Millis.ai: {millis_error}")
-                # Continue with database deletion even if Millis.ai deletion fails
-                # This allows cleanup of orphaned database records
+        # Handle multiple-type campaigns: delete all chunks
+        if campaign_type == 'multiple':
+            from models.client import Chunk
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+            
+            if chunks:
+                logger.info(f"Campaign {campaign_id} is multiple-type with {len(chunks)} chunks. Deleting all chunks...")
+                
+                failed_chunks = []
+                for chunk in chunks:
+                    # Delete chunk from Millis.ai if it has a CID
+                    if chunk.cid:
+                        logger.info(f"Deleting chunk {chunk.chunk_name} from Millis.ai (CID: {chunk.cid})")
+                        millis_success, millis_error = delete_campaign_in_millis(chunk.cid)
+                        if not millis_success:
+                            logger.warning(f"Failed to delete chunk {chunk.chunk_name} from Millis.ai: {millis_error}")
+                            failed_chunks.append(chunk.chunk_name)
+                            # Continue with deletion even if Millis deletion fails
+                    
+                    # Delete chunk from database
+                    db.delete(chunk)
+                
+                if failed_chunks:
+                    logger.warning(f"Failed to delete {len(failed_chunks)} chunks from Millis.ai: {', '.join(failed_chunks)}")
+                
+                logger.info(f"Deleted {len(chunks)} chunks from database")
         else:
-            logger.info(f"Campaign {campaign_id} has no CID, skipping Millis.ai deletion")
+            # Handle single-type campaigns
+            # Delete campaign from Millis.ai if CID exists
+            if campaign_cid:
+                millis_success, millis_error = delete_campaign_in_millis(campaign_cid)
+                if not millis_success:
+                    logger.warning(f"Failed to delete campaign from Millis.ai: {millis_error}")
+                    # Continue with database deletion even if Millis.ai deletion fails
+                    # This allows cleanup of orphaned database records
+            else:
+                logger.info(f"Campaign {campaign_id} has no CID, skipping Millis.ai deletion")
         
         # Delete campaign from database
         db.delete(campaign)
@@ -500,15 +615,22 @@ def upload_csv_records_to_campaign(db: DB_DEPENDENCY, campaign_id: int) -> Tuple
         return False, error_msg, None
 
 
-def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tuple[bool, Optional[str], Optional[str]]:
+def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Set caller phone for a campaign in Millis.ai and update database.
+    For multiple-type campaigns, sets caller for all chunks.
     
     Process:
     1. Get campaign from database by campaign_id
     2. Get phone details from Millis.ai to get agent_id
-    3. Set caller in Millis.ai API
-    4. Update phone_id and agent_id in database
+    3. If campaign is 'single' type:
+       - Set caller in Millis.ai API
+       - Update phone_id and agent_id in database
+    4. If campaign is 'multiple' type:
+       - Get all chunks for the campaign
+       - Set caller for each chunk in Millis.ai
+       - Update phone_id and agent_id in chunks table
+       - Update phone_id and agent_id in campaign table
     
     Args:
         db: Database session
@@ -516,10 +638,10 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
         phone_id: Phone ID from Millis.ai (e.g., "+911140848678")
     
     Returns:
-        Tuple of (success, error_message, agent_id)
+        Tuple of (success, error_message, result_data)
         - success: Whether operation succeeded
         - error_message: Error message if failed, None if succeeded
-        - agent_id: Agent ID associated with the phone if succeeded, None if failed
+        - result_data: Dict with agent_id and chunks_updated (for multiple-type campaigns)
     """
     logger.info(f"Setting caller {phone_id} for campaign {campaign_id}")
     
@@ -531,10 +653,7 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
             logger.error(error_msg)
             return False, error_msg, None
         
-        if not campaign.cid:
-            error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
-            logger.error(error_msg)
-            return False, error_msg, None
+        campaign_type = campaign.type if campaign.type else 'single'
         
         # Get phone details to find agent_id
         phones_success, phones_error, phones_data = get_phones()
@@ -557,21 +676,91 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
         
         agent_id = phone_info.get("agent_id")
         
-        # Set caller in Millis.ai
-        millis_success, millis_error = set_caller(campaign.cid, phone_id)
-        if not millis_success:
-            error_msg = millis_error or "Failed to set caller in Millis.ai"
-            logger.error(error_msg)
-            return False, error_msg, None
-        
-        # Update database
-        campaign.phone_id = phone_id
-        campaign.agent_id = agent_id
-        db.commit()
-        db.refresh(campaign)
-        
-        logger.info(f"Successfully set caller {phone_id} (agent_id: {agent_id}) for campaign {campaign_id}")
-        return True, None, agent_id
+        if campaign_type == 'multiple':
+            # Handle multiple-type campaign: set caller for all chunks
+            from models.client import Chunk
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+            
+            if not chunks:
+                error_msg = f"Campaign {campaign_id} is multiple-type but has no chunks"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            logger.info(f"Campaign {campaign_id} is multiple-type with {len(chunks)} chunks. Setting caller for all chunks...")
+            
+            failed_chunks = []
+            success_count = 0
+            
+            for chunk in chunks:
+                if not chunk.cid:
+                    logger.warning(f"Chunk {chunk.id} ({chunk.chunk_name}) has no CID, skipping")
+                    failed_chunks.append(chunk.chunk_name)
+                    continue
+                
+                # Set caller for this chunk in Millis.ai
+                millis_success, millis_error = set_caller(chunk.cid, phone_id)
+                if not millis_success:
+                    logger.error(f"Failed to set caller for chunk {chunk.chunk_name}: {millis_error}")
+                    failed_chunks.append(chunk.chunk_name)
+                    continue
+                
+                # Update chunk in database
+                chunk.phone_id = phone_id
+                chunk.agent_id = agent_id
+                success_count += 1
+                logger.info(f"✓ Set caller for chunk {chunk.chunk_name} (CID: {chunk.cid})")
+            
+            # Update parent campaign
+            campaign.phone_id = phone_id
+            campaign.agent_id = agent_id
+            
+            db.commit()
+            
+            if failed_chunks:
+                error_msg = f"Set caller for {success_count}/{len(chunks)} chunks. Failed: {', '.join(failed_chunks)}"
+                logger.warning(error_msg)
+                if success_count == 0:
+                    return False, error_msg, None
+                # Partial success
+                return True, None, {
+                    'agent_id': agent_id,
+                    'chunks_updated': success_count,
+                    'total_chunks': len(chunks)
+                }
+            
+            logger.info(f"Successfully set caller {phone_id} (agent_id: {agent_id}) for all {len(chunks)} chunks of campaign {campaign_id}")
+            return True, None, {
+                'agent_id': agent_id,
+                'chunks_updated': success_count,
+                'total_chunks': len(chunks)
+            }
+            
+        else:
+            # Handle single-type campaign
+            if not campaign.cid:
+                error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            # Set caller in Millis.ai
+            millis_success, millis_error = set_caller(campaign.cid, phone_id)
+            if not millis_success:
+                error_msg = millis_error or "Failed to set caller in Millis.ai"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            # Update database
+            campaign.phone_id = phone_id
+            campaign.agent_id = agent_id
+            db.commit()
+            db.refresh(campaign)
+            
+            logger.info(f"Successfully set caller {phone_id} (agent_id: {agent_id}) for campaign {campaign_id}")
+            return True, None, {
+                'agent_id': agent_id,
+                'chunks_updated': None,  # Not applicable for single-type campaigns
+                'total_chunks': None
+            }
         
     except Exception as e:
         db.rollback()
