@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database } from 'lucide-react';
+import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database, Play, Clock, XCircle } from 'lucide-react';
 import { DataTable } from './DataTable';
 import { api } from '@/lib/api';
 
@@ -184,6 +184,24 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     show: boolean;
     chunkNames: string[];
   }>({ show: false, chunkNames: [] });
+
+  // Auto-start chunks modal (for multiple-type campaigns)
+  const [autoStartModal, setAutoStartModal] = useState<{
+    show: boolean;
+    campaign: Campaign | null;
+  }>({ show: false, campaign: null });
+  const [autoStartChunks, setAutoStartChunks] = useState<any[]>([]);
+  const [autoStartGap, setAutoStartGap] = useState<number>(30); // seconds between chunks
+  const [isAutoStarting, setIsAutoStarting] = useState(false);
+  const [shouldStopAutoStart, setShouldStopAutoStart] = useState(false);
+  const shouldStopAutoStartRef = useRef(false); // Ref for synchronous access in async functions
+  const [autoStartProgress, setAutoStartProgress] = useState<Record<number, {
+    status: 'pending' | 'starting' | 'started' | 'waiting_finish' | 'finished' | 'countdown' | 'failed';
+    message: string;
+    countdown?: number;
+  }>>({});
+  const [startingIndividualChunk, setStartingIndividualChunk] = useState<number | null>(null);
+  const [refreshingChunkStatuses, setRefreshingChunkStatuses] = useState(false);
   
   // Upload metadata states
   const [uploadMetadataEnabled, setUploadMetadataEnabled] = useState(false);
@@ -561,10 +579,56 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   };
 
   // Function to open start campaign confirmation modal
-  const handleOpenStartModal = (campaignId: number) => {
+  const handleOpenStartModal = async (campaignId: number) => {
     const campaign = campaigns.find(c => c.id === campaignId);
-    if (campaign) {
+    if (!campaign) return;
+    
+    // If single-type campaign, use the existing modal
+    if (campaign.type === 'single' || !campaign.type) {
       setCampaignActionModal({ show: true, action: 'start', campaign });
+      return;
+    }
+    
+    // If multiple-type campaign, fetch chunks and open auto-start modal
+    if (campaign.type === 'multiple') {
+      try {
+        console.log('[OPEN_MODAL] Fetching chunks for campaign:', campaignId);
+        const response = await api.get(`/chunk/campaign/${campaignId}`);
+        if (response.ok) {
+          const result = await response.json();
+          const chunks = result.chunks || [];
+          setAutoStartChunks(chunks);
+          setAutoStartModal({ show: true, campaign });
+          setAutoStartProgress({});
+          
+          // Automatically refresh all chunk statuses when modal opens
+          console.log('[OPEN_MODAL] Auto-refreshing chunk statuses...');
+          try {
+            // Fetch fresh status for all chunks
+            for (const chunk of chunks) {
+              if (chunk.cid) {
+                await api.get(`/chunk/${chunk.id}/status`);
+              }
+            }
+            
+            // Refresh chunks list to show updated statuses
+            const refreshResponse = await api.get(`/chunk/campaign/${campaignId}`);
+            if (refreshResponse.ok) {
+              const refreshResult = await refreshResponse.json();
+              setAutoStartChunks(refreshResult.chunks || []);
+              console.log('[OPEN_MODAL] ✓ Chunk statuses refreshed automatically');
+            }
+          } catch (refreshError) {
+            console.error('[OPEN_MODAL] Error refreshing statuses:', refreshError);
+            // Don't alert - modal still opens with original data
+          }
+        } else {
+          alert('Failed to fetch chunks for this campaign');
+        }
+      } catch (error: any) {
+        console.error('Error fetching chunks:', error);
+        alert(`Error: ${error.message || 'Failed to fetch chunks'}`);
+      }
     }
   };
 
@@ -671,6 +735,423 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       alert(`Error: ${error.message || 'Failed to stop campaign'}`);
     } finally {
       setStartingCampaign(null);
+    }
+  };
+
+  // Function to start an individual chunk
+  const handleStartIndividualChunk = async (chunkId: number) => {
+    console.log(`[START_CHUNK] Starting individual chunk ${chunkId}`);
+    setStartingIndividualChunk(chunkId);
+    
+    try {
+      const response = await api.post(`/chunk/${chunkId}/start`);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.detail || 'Failed to start chunk';
+        alert(errorMessage);
+        return;
+      }
+      
+      const result = await response.json();
+      console.log(`[START_CHUNK] Successfully started chunk:`, result);
+      
+      // Wait 2 seconds for Millis.ai to update status
+      console.log(`[START_CHUNK] Waiting 2 seconds for status update...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Fetch updated status from Millis.ai
+      console.log(`[START_CHUNK] Fetching updated status for chunk ${chunkId}`);
+      const statusResponse = await api.get(`/chunk/${chunkId}/status`);
+      if (statusResponse.ok) {
+        const statusResult = await statusResponse.json();
+        console.log(`[START_CHUNK] Updated status: ${statusResult.status}`);
+      }
+      
+      // Refresh chunks list to show updated status
+      if (autoStartModal.campaign) {
+        const chunksResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
+        if (chunksResponse.ok) {
+          const chunksResult = await chunksResponse.json();
+          setAutoStartChunks(chunksResult.chunks || []);
+          console.log(`[START_CHUNK] Chunks list refreshed`);
+        }
+      }
+      
+      alert(`Successfully started chunk: ${result.chunk_name}`);
+      
+    } catch (error: any) {
+      console.error('[START_CHUNK] Error:', error);
+      alert(`Error: ${error.message || 'Failed to start chunk'}`);
+    } finally {
+      setStartingIndividualChunk(null);
+    }
+  };
+
+  // Function to poll chunk status until it becomes "finished"
+  const pollChunkStatus = async (chunkId: number): Promise<string> => {
+    const maxAttempts = 1000; // Max polling attempts (1000 * 10s = ~166 minutes max)
+    const pollInterval = 10000; // 10 seconds (faster status updates)
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Check if user requested to stop
+      if (shouldStopAutoStartRef.current) {
+        console.log(`[POLL_STATUS] Stop requested by user, aborting poll for chunk ${chunkId}`);
+        throw new Error('Auto-start stopped by user');
+      }
+      
+      try {
+        const response = await api.get(`/chunk/${chunkId}/status`);
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log(`[POLL_STATUS] Chunk ${chunkId} status: ${result.status} (attempt ${attempt + 1})`);
+          
+          if (result.status === 'finished') {
+            console.log(`[POLL_STATUS] ✓ Chunk ${chunkId} finished!`);
+            return 'finished';
+          }
+          
+          // Update progress message with waiting time
+          const elapsedSeconds = (attempt + 1) * (pollInterval / 1000);
+          setAutoStartProgress(prev => ({
+            ...prev,
+            [chunkId]: {
+              ...prev[chunkId],
+              message: `Waiting for chunk to finish... (status: ${result.status}, elapsed: ${elapsedSeconds}s)`
+            }
+          }));
+          
+          // Wait before next poll (10 seconds) - check stop flag periodically during wait
+          for (let waitCount = 0; waitCount < pollInterval / 1000; waitCount++) {
+            if (shouldStopAutoStartRef.current) {
+              console.log(`[POLL_STATUS] Stop requested by user during wait, aborting poll for chunk ${chunkId}`);
+              throw new Error('Auto-start stopped by user');
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second at a time
+          }
+        } else {
+          console.error(`[POLL_STATUS] Failed to fetch status for chunk ${chunkId}`);
+          // Check stop flag before waiting
+          if (shouldStopAutoStartRef.current) {
+            console.log(`[POLL_STATUS] Stop requested by user, aborting poll for chunk ${chunkId}`);
+            throw new Error('Auto-start stopped by user');
+          }
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+      } catch (error: any) {
+        // If it's a stop error, re-throw it
+        if (error.message === 'Auto-start stopped by user') {
+          throw error;
+        }
+        console.error(`[POLL_STATUS] Error polling chunk ${chunkId}:`, error);
+        // Check stop flag before waiting
+        if (shouldStopAutoStartRef.current) {
+          console.log(`[POLL_STATUS] Stop requested by user after error, aborting poll for chunk ${chunkId}`);
+          throw new Error('Auto-start stopped by user');
+        }
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+    }
+    
+    throw new Error('Polling timeout: chunk did not finish in expected time');
+  };
+
+  // Function to run countdown timer
+  const runCountdown = async (chunkId: number, seconds: number): Promise<void> => {
+    for (let remaining = seconds; remaining > 0; remaining--) {
+      // Check if user requested to stop
+      if (shouldStopAutoStartRef.current) {
+        console.log(`[COUNTDOWN] Stop requested by user, aborting countdown for chunk ${chunkId}`);
+        throw new Error('Auto-start stopped by user');
+      }
+      
+      setAutoStartProgress(prev => ({
+        ...prev,
+        [chunkId]: {
+          status: 'countdown',
+          message: `Next chunk will start in ${remaining} seconds...`,
+          countdown: remaining
+        }
+      }));
+      
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+    }
+    
+    // After countdown completes, update progress to show completion
+    setAutoStartProgress(prev => ({
+      ...prev,
+      [chunkId]: {
+        status: 'finished',
+        message: 'Countdown completed, moving to next chunk ✓'
+      }
+    }));
+  };
+
+  // Function to handle auto-start of all chunks
+  const handleAutoStartChunks = async () => {
+    if (!autoStartModal.campaign || autoStartChunks.length === 0) return;
+    
+    console.log('[AUTO_START] Starting auto-start sequence');
+    console.log('[AUTO_START] Gap between chunks:', autoStartGap, 'seconds');
+    console.log('[AUTO_START] Total chunks:', autoStartChunks.length);
+    
+    setIsAutoStarting(true);
+    setShouldStopAutoStart(false);
+    shouldStopAutoStartRef.current = false; // Reset ref
+    
+    try {
+      for (let i = 0; i < autoStartChunks.length; i++) {
+        // Check if user requested to stop (check both state and ref)
+        if (shouldStopAutoStartRef.current || shouldStopAutoStart) {
+          console.log('[AUTO_START] Stop requested by user, terminating auto-start...');
+          alert('Auto-start stopped by user');
+          break;
+        }
+        
+        const chunk = autoStartChunks[i];
+        console.log(`\n[AUTO_START] Processing chunk ${i + 1}/${autoStartChunks.length}: ${chunk.chunk_name}`);
+        
+        // Initialize progress for this chunk
+        setAutoStartProgress(prev => ({
+          ...prev,
+          [chunk.id]: {
+            status: 'pending',
+            message: `Checking chunk status...`
+          }
+        }));
+        
+        try {
+          // Step 0: Check current chunk status
+          console.log(`[AUTO_START] Step 0: Checking status of chunk ${chunk.id}`);
+          const statusResponse = await api.get(`/chunk/${chunk.id}/status`);
+          
+          if (!statusResponse.ok) {
+            throw new Error('Failed to fetch chunk status');
+          }
+          
+          const statusResult = await statusResponse.json();
+          const currentStatus = statusResult.status;
+          console.log(`[AUTO_START] Current status: ${currentStatus}`);
+          
+          // Decision based on current status
+          if (currentStatus === 'finished') {
+            // Chunk already finished, skip it WITHOUT timer
+            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} is already finished, skipping to next (no timer)...`);
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'finished',
+                message: 'Already finished (skipped, no timer) ✓'
+              }
+            }));
+            
+            // Refresh status before moving to next chunk
+            console.log(`[AUTO_START] Refreshing status before moving to next...`);
+            if (autoStartModal.campaign) {
+              try {
+                const refreshResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
+                if (refreshResponse.ok) {
+                  const refreshResult = await refreshResponse.json();
+                  setAutoStartChunks(refreshResult.chunks || []);
+                }
+              } catch (err) {
+                console.error('[AUTO_START] Error refreshing chunks:', err);
+              }
+            }
+            
+            // NO TIMER - immediately move to next chunk
+            console.log(`[AUTO_START] Moving to next chunk immediately (no countdown)`);
+            continue;
+          }
+          
+          if (currentStatus === 'started') {
+            // Chunk is already started, just wait for it to finish
+            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} is already started, waiting for finish...`);
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'waiting_finish',
+                message: 'Already started, waiting for finish...'
+              }
+            }));
+            
+            // Wait for chunk to finish
+            await pollChunkStatus(chunk.id);
+            
+            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} finished!`);
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'finished',
+                message: 'Chunk finished (no timer - already started) ✓'
+              }
+            }));
+            
+            // Refresh status before moving to next chunk
+            console.log(`[AUTO_START] Refreshing status before moving to next...`);
+            if (autoStartModal.campaign) {
+              try {
+                const refreshResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
+                if (refreshResponse.ok) {
+                  const refreshResult = await refreshResponse.json();
+                  setAutoStartChunks(refreshResult.chunks || []);
+                }
+              } catch (err) {
+                console.error('[AUTO_START] Error refreshing chunks:', err);
+              }
+            }
+            
+            // NO TIMER - didn't go through full cycle (idle→started→finished)
+            // This was already started, so we skip the countdown
+            console.log(`[AUTO_START] Moving to next chunk immediately (no countdown - chunk was already started)`);
+            continue;
+          }
+          
+          if (currentStatus === 'idle') {
+            // Chunk is idle, start it
+            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} is idle, starting...`);
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'starting',
+                message: `Starting chunk ${i + 1}/${autoStartChunks.length}...`
+              }
+            }));
+            
+            // Step 1: Start the chunk
+            console.log(`[AUTO_START] Step 1: Starting chunk ${chunk.id}`);
+            const startResponse = await api.post(`/chunk/${chunk.id}/start`);
+            
+            if (!startResponse.ok) {
+              const errorData = await startResponse.json();
+              throw new Error(errorData.detail || 'Failed to start chunk');
+            }
+            
+            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} started successfully`);
+            
+            // Update status to started
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'started',
+                message: 'Chunk started successfully'
+              }
+            }));
+            
+            // Step 2: Wait for chunk to finish
+            console.log(`[AUTO_START] Step 2: Waiting for chunk ${chunk.id} to finish...`);
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'waiting_finish',
+                message: 'Waiting for chunk to finish...'
+              }
+            }));
+            
+            await pollChunkStatus(chunk.id);
+            
+            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} finished!`);
+            
+            // Update status to finished
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'finished',
+                message: 'Chunk finished (full cycle completed) ✓'
+              }
+            }));
+            
+            // Refresh status before countdown/moving to next chunk
+            console.log(`[AUTO_START] Refreshing status before moving to next...`);
+            if (autoStartModal.campaign) {
+              try {
+                const refreshResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
+                if (refreshResponse.ok) {
+                  const refreshResult = await refreshResponse.json();
+                  setAutoStartChunks(refreshResult.chunks || []);
+                  console.log(`[AUTO_START] ✓ Status refreshed`);
+                }
+              } catch (err) {
+                console.error('[AUTO_START] Error refreshing chunks:', err);
+              }
+            }
+            
+            // Step 3: Countdown before next chunk (if not the last chunk)
+            // Timer runs because chunk went through FULL CYCLE: idle → started → finished
+            if (i < autoStartChunks.length - 1) {
+              console.log(`[AUTO_START] Step 3: Full cycle completed (idle→started→finished), countdown for ${autoStartGap} seconds`);
+              await runCountdown(chunk.id, autoStartGap);
+              // Small delay to show the completion message before moving to next chunk
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          } else {
+            // Unknown status, skip with warning
+            console.warn(`[AUTO_START] Chunk ${chunk.chunk_name} has unexpected status: ${currentStatus}, skipping...`);
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'failed',
+                message: `Unexpected status: ${currentStatus} (skipped)`
+              }
+            }));
+          }
+          
+        } catch (error: any) {
+          // Check if this is a user-initiated stop
+          if (error.message === 'Auto-start stopped by user') {
+            console.log('[AUTO_START] User stopped auto-start, breaking loop');
+            setAutoStartProgress(prev => ({
+              ...prev,
+              [chunk.id]: {
+                status: 'failed',
+                message: 'Stopped by user'
+              }
+            }));
+            break; // Break out of the loop without asking user
+          }
+          
+          console.error(`[AUTO_START] Error with chunk ${chunk.chunk_name}:`, error);
+          setAutoStartProgress(prev => ({
+            ...prev,
+            [chunk.id]: {
+              status: 'failed',
+              message: `Failed: ${error.message}`
+            }
+          }));
+          
+          // Ask user if they want to continue
+          const continueNext = confirm(`Chunk ${chunk.chunk_name} failed: ${error.message}\n\nContinue with next chunk?`);
+          if (!continueNext) {
+            break;
+          }
+        }
+      }
+      
+      // Only show completion message if we didn't stop early
+      if (!shouldStopAutoStartRef.current) {
+        console.log('[AUTO_START] Auto-start sequence completed');
+        alert('Auto-start sequence completed!');
+      } else {
+        console.log('[AUTO_START] Auto-start sequence stopped by user');
+      }
+      
+      // Refresh chunks
+      if (autoStartModal.campaign) {
+        const chunksResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
+        if (chunksResponse.ok) {
+          const chunksResult = await chunksResponse.json();
+          setAutoStartChunks(chunksResult.chunks || []);
+        }
+      }
+      
+    } catch (error: any) {
+      console.error('[AUTO_START] Fatal error:', error);
+      alert(`Auto-start failed: ${error.message}`);
+    } finally {
+      setIsAutoStarting(false);
+      setShouldStopAutoStart(false);
+      shouldStopAutoStartRef.current = false; // Reset ref
     }
   };
 
@@ -1153,25 +1634,6 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
                               {campaign.status === 'finished' ? (
                                 <span className="text-sm">{campaign.phone_id || 'N/A'}</span>
-                              ) : campaign.status === 'idle' ? (
-                                campaign.phone_id ? (
-                                  <div className="relative group">
-                                    <span className="text-sm">{campaign.phone_id}</span>
-                                    <button
-                                      onClick={() => handleOpenPhoneModal(campaign.id)}
-                                      className="absolute top-0 left-0 w-full h-full opacity-0 group-hover:opacity-100 bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium transition-opacity"
-                                    >
-                                      Update
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    onClick={() => handleOpenPhoneModal(campaign.id)}
-                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
-                                  >
-                                    Set Phone
-                                  </button>
-                                )
                               ) : campaign.status === 'started' ? (
                                 <button
                                   onClick={() => handleOpenStopModal(campaign.id)}
@@ -1181,26 +1643,92 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                   {startingCampaign === campaign.id ? 'Stopping...' : 'Stop'}
                                 </button>
                               ) : (
-                                <span className="text-sm">{campaign.phone_id || 'N/A'}</span>
+                                // Show Set Phone button for both single and multiple type campaigns
+                                campaign.phone_id ? (
+                                  <div className="relative group">
+                                    <span className="text-sm">{campaign.phone_id}</span>
+                                    <button
+                                      onClick={() => handleOpenPhoneModal(campaign.id)}
+                                      disabled={settingChunkPhones === campaign.id}
+                                      className="absolute top-0 left-0 w-full h-full opacity-0 group-hover:opacity-100 bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                      title={campaign.type === 'multiple' ? 'Update Phone ID for all chunks' : 'Update Phone ID'}
+                                    >
+                                      {settingChunkPhones === campaign.id ? 'Updating...' : 'Update'}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => handleOpenPhoneModal(campaign.id)}
+                                    disabled={settingChunkPhones === campaign.id}
+                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={campaign.type === 'multiple' ? 'Set Phone ID for all chunks' : 'Set Phone ID'}
+                                  >
+                                    {settingChunkPhones === campaign.id ? 'Setting...' : 'Set Phone'}
+                                  </button>
+                                )
                               )}
                             </td>
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
-                              {campaign.status === 'idle' && campaign.phone_id ? (
-                                <button
-                                  onClick={() => handleOpenStartModal(campaign.id)}
-                                  disabled={startingCampaign === campaign.id}
-                                  className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {startingCampaign === campaign.id ? 'Starting...' : 'Start'}
-                                </button>
-                              ) : campaign.status === 'started' ? (
-                                <button
-                                  disabled
-                                  className="px-3 py-1 bg-gray-400 text-white rounded text-xs font-medium cursor-not-allowed opacity-50"
-                                >
-                                  Start
-                                </button>
-                              ) : null}
+                              {(() => {
+                                // For single-type campaigns: show Start button only when status is 'idle' and phone is set
+                                if (campaign.type === 'single' || !campaign.type) {
+                                  if (campaign.status === 'idle' && campaign.phone_id) {
+                                    return (
+                                      <button
+                                        onClick={() => handleOpenStartModal(campaign.id)}
+                                        disabled={startingCampaign === campaign.id}
+                                        className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {startingCampaign === campaign.id ? 'Starting...' : 'Start'}
+                                      </button>
+                                    );
+                                  } else if (campaign.status === 'started') {
+                                    return (
+                                      <button
+                                        disabled
+                                        className="px-3 py-1 bg-gray-400 text-white rounded text-xs font-medium cursor-not-allowed opacity-50"
+                                      >
+                                        Start
+                                      </button>
+                                    );
+                                  }
+                                  return null;
+                                }
+                                
+                                // For multiple-type campaigns: show Start button if phone is set and status indicates there are idle chunks
+                                // Status can be: 'idle', 'partly idle', 'chunks_started', 'partly finished', 'pending', etc.
+                                // Don't show if all chunks are 'started' or 'finished'
+                                if (campaign.type === 'multiple') {
+                                  const hasIdleChunks = campaign.phone_id && 
+                                    campaign.status !== 'finished' && 
+                                    campaign.status !== 'started' &&
+                                    campaign.status !== 'mixed';
+                                  
+                                  if (hasIdleChunks) {
+                                    return (
+                                      <button
+                                        onClick={() => handleOpenStartModal(campaign.id)}
+                                        disabled={startingCampaign === campaign.id}
+                                        className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {startingCampaign === campaign.id ? 'Starting...' : 'Start'}
+                                      </button>
+                                    );
+                                  } else if (campaign.status === 'started' || campaign.status === 'finished') {
+                                    return (
+                                      <button
+                                        disabled
+                                        className="px-3 py-1 bg-gray-400 text-white rounded text-xs font-medium cursor-not-allowed opacity-50"
+                                      >
+                                        Start
+                                      </button>
+                                    );
+                                  }
+                                  return null;
+                                }
+                                
+                                return null;
+                              })()}
                             </td>
                             <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -1289,18 +1817,6 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                 {/* MULTIPLE TYPE CAMPAIGNS (CHUNKED) */}
                                 {campaign.type === 'multiple' && (
                                   <>
-                                    {/* Set Phone button - show for all non-finished campaigns */}
-                                    {campaign.status !== 'finished' && campaign.status !== 'started' && (
-                                      <button
-                                        onClick={() => handleOpenPhoneModal(campaign.id)}
-                                        disabled={settingChunkPhones === campaign.id}
-                                        className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title="Set Phone ID for all chunks"
-                                      >
-                                        {settingChunkPhones === campaign.id ? 'Setting...' : 'Set Phone'}
-                                      </button>
-                                    )}
-                                    
                                     {/* Upsert button - show when status is not finished */}
                                     {campaign.status !== 'finished' && (
                                       <button
@@ -3033,6 +3549,272 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   <p className="text-xs">Please create chunks first before upserting.</p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Start Chunks Modal (for multiple-type campaigns) */}
+      {autoStartModal.show && autoStartModal.campaign && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[var(--foreground)]">
+                Start Multiple Chunks Campaign: {autoStartModal.campaign.campaign_name}
+              </h3>
+              <button
+                onClick={() => {
+                  if (!isAutoStarting) {
+                    setAutoStartModal({ show: false, campaign: null });
+                    setAutoStartChunks([]);
+                    setAutoStartProgress({});
+                  }
+                }}
+                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors disabled:opacity-50"
+                disabled={isAutoStarting}
+              >
+                <X className="w-5 h-5 text-[var(--secondary)]" />
+              </button>
+            </div>
+
+            {/* Auto Start Controls */}
+            <div className="mb-6 p-4 bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                    Gap Between Chunks (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={autoStartGap}
+                    onChange={(e) => setAutoStartGap(parseInt(e.target.value) || 0)}
+                    disabled={isAutoStarting}
+                    className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50"
+                  />
+                  <p className="text-xs text-[var(--secondary)] mt-1">
+                    Time to wait after each chunk finishes before starting the next one
+                  </p>
+                </div>
+                <div className="flex items-end gap-3">
+                  <button
+                    onClick={async () => {
+                      if (!autoStartModal.campaign) return;
+                      console.log('[REFRESH_STATUS] Refreshing all chunk statuses...');
+                      setRefreshingChunkStatuses(true);
+                      
+                      try {
+                        // Fetch status for all chunks
+                        for (const chunk of autoStartChunks) {
+                          if (chunk.cid) {
+                            await api.get(`/chunk/${chunk.id}/status`);
+                          }
+                        }
+                        
+                        // Refresh chunks list
+                        const chunksResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
+                        if (chunksResponse.ok) {
+                          const chunksResult = await chunksResponse.json();
+                          setAutoStartChunks(chunksResult.chunks || []);
+                          console.log('[REFRESH_STATUS] All statuses refreshed');
+                        }
+                      } catch (error) {
+                        console.error('[REFRESH_STATUS] Error:', error);
+                        alert('Failed to refresh statuses');
+                      } finally {
+                        setRefreshingChunkStatuses(false);
+                      }
+                    }}
+                    disabled={isAutoStarting || autoStartChunks.length === 0 || refreshingChunkStatuses}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {refreshingChunkStatuses ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Refreshing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        Refresh Status
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleAutoStartChunks}
+                    disabled={isAutoStarting || autoStartChunks.length === 0}
+                    className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-md hover:from-green-700 hover:to-green-800 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isAutoStarting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Auto-Starting...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        Auto Start All
+                      </>
+                    )}
+                  </button>
+                  {isAutoStarting && (
+                    <button
+                      onClick={() => {
+                        console.log('[AUTO_START] Stop requested by user');
+                        setShouldStopAutoStart(true);
+                        shouldStopAutoStartRef.current = true; // Also update ref for immediate access
+                      }}
+                      className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium flex items-center gap-2"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      Stop Auto Start
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 rounded-md text-xs">
+                <p className="font-semibold mb-1">How Auto Start Works:</p>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Starts the first chunk</li>
+                  <li>Waits until the chunk status becomes "finished"</li>
+                  <li>Counts down the specified gap time</li>
+                  <li>Starts the next chunk</li>
+                  <li>Repeats until all chunks are completed</li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Chunks Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-[var(--card-border)]">
+                <thead className="bg-[var(--table-header-bg)]">
+                  <tr>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">#</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Chunk Name</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">CID</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Records</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Status</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Phone ID</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Auto Progress</th>
+                    <th className="border border-[var(--card-border)] px-4 py-2 text-left text-sm font-semibold text-[var(--foreground)]">Manual Start</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {autoStartChunks.map((chunk, index) => {
+                    const progress = autoStartProgress[chunk.id];
+                    return (
+                      <tr key={chunk.id} className="hover:bg-[var(--table-row-hover)]">
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {index + 1}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.chunk_name}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-xs text-[var(--foreground)] font-mono">
+                          {chunk.cid ? chunk.cid.substring(0, 12) + '...' : 'N/A'}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
+                          {chunk.records_count || 0}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            chunk.status === 'finished' 
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' 
+                              : chunk.status === 'idle'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                              : chunk.status === 'started'
+                              ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          }`}>
+                            {chunk.status || 'pending'}
+                          </span>
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-xs text-[var(--foreground)]">
+                          {chunk.phone_id || 'N/A'}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm">
+                          {progress ? (
+                            <div className="flex items-center gap-2">
+                              {progress.status === 'starting' && (
+                                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                              )}
+                              {progress.status === 'started' && (
+                                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                              )}
+                              {progress.status === 'waiting_finish' && (
+                                <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
+                              )}
+                              {progress.status === 'finished' && (
+                                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                              )}
+                              {progress.status === 'countdown' && (
+                                <Clock className="w-4 h-4 text-blue-600" />
+                              )}
+                              {progress.status === 'failed' && (
+                                <XCircle className="w-4 h-4 text-red-600" />
+                              )}
+                              <span className="text-xs text-[var(--foreground)]">{progress.message}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-[var(--secondary)]">-</span>
+                          )}
+                        </td>
+                        <td className="border border-[var(--card-border)] px-4 py-2 text-sm">
+                          {chunk.status === 'idle' ? (
+                            <button
+                              onClick={() => handleStartIndividualChunk(chunk.id)}
+                              disabled={isAutoStarting || startingIndividualChunk === chunk.id || !chunk.cid}
+                              className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                            >
+                              {(startingIndividualChunk === chunk.id || autoStartProgress[chunk.id]?.status === 'starting') ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Starting...
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-3 h-3" />
+                                  Start
+                                </>
+                              )}
+                            </button>
+                          ) : chunk.status === 'started' || chunk.status === 'finished' ? (
+                            <span className="text-xs text-[var(--secondary)]">
+                              {chunk.status === 'started' ? 'Running' : 'Completed'}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-[var(--secondary)]">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {autoStartChunks.length === 0 && (
+              <div className="p-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded-md text-sm text-center">
+                No chunks found for this campaign
+              </div>
+            )}
+
+            {/* Close Button */}
+            <div className="flex items-center justify-end mt-6">
+              <button
+                onClick={() => {
+                  if (!isAutoStarting) {
+                    setAutoStartModal({ show: false, campaign: null });
+                    setAutoStartChunks([]);
+                    setAutoStartProgress({});
+                  }
+                }}
+                disabled={isAutoStarting}
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isAutoStarting ? 'Running...' : 'Close'}
+              </button>
             </div>
           </div>
         </div>

@@ -565,3 +565,194 @@ def upsert_single_chunk(
         logger.error(error_msg)
         return False, error_msg, None
 
+
+def start_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Start a single chunk campaign in Millis.ai.
+    
+    Validates:
+    1. Chunk exists in database
+    2. Chunk has a CID
+    3. Chunk has a caller set in Millis.ai
+    4. Calls Millis.ai API to start the chunk's campaign
+    
+    Args:
+        db: Database session
+        chunk_id: Chunk ID in database
+    
+    Returns:
+        Tuple of (success, error_message, result_data)
+    """
+    logger.info(f"[START_CHUNK] Starting chunk {chunk_id}")
+    
+    try:
+        from service.millis_api import get_campaign_info, start_campaign
+        
+        # Get chunk from database
+        chunk = db.query(Chunk).filter(Chunk.id == chunk_id).first()
+        if not chunk:
+            error_msg = f"Chunk {chunk_id} not found"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        logger.info(f"[START_CHUNK] Chunk found: {chunk.chunk_name}, CID: {chunk.cid}")
+        
+        # Validate CID
+        if not chunk.cid:
+            error_msg = f"Chunk {chunk.chunk_name} has no CID. Please upsert the chunk first."
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        # Validate caller is set in Millis.ai
+        millis_success, millis_error, millis_info = get_campaign_info(chunk.cid)
+        if not millis_success or not millis_info:
+            error_msg = millis_error or f"Failed to fetch chunk info from Millis.ai"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        millis_caller = millis_info.get("caller")
+        if not millis_caller:
+            error_msg = f"Chunk {chunk.chunk_name} has no caller set. Please set a phone number first."
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        logger.info(f"[START_CHUNK] Caller validated: {millis_caller}")
+        
+        # Start campaign in Millis.ai
+        start_success, start_error = start_campaign(chunk.cid)
+        if not start_success:
+            error_msg = start_error or "Failed to start chunk in Millis.ai"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        logger.info(f"[START_CHUNK] Successfully started chunk {chunk.chunk_name} (CID: {chunk.cid})")
+        
+        result_data = {
+            "chunk_id": chunk.id,
+            "chunk_name": chunk.chunk_name,
+            "cid": chunk.cid
+        }
+        
+        return True, None, result_data
+        
+    except Exception as e:
+        error_msg = f"Error starting chunk: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg, None
+
+
+def stop_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Stop a single chunk campaign in Millis.ai.
+    
+    Args:
+        db: Database session
+        chunk_id: Chunk ID in database
+    
+    Returns:
+        Tuple of (success, error_message, result_data)
+    """
+    logger.info(f"[STOP_CHUNK] Stopping chunk {chunk_id}")
+    
+    try:
+        from service.millis_api import stop_campaign_millis
+        
+        # Get chunk from database
+        chunk = db.query(Chunk).filter(Chunk.id == chunk_id).first()
+        if not chunk:
+            error_msg = f"Chunk {chunk_id} not found"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        if not chunk.cid:
+            error_msg = f"Chunk {chunk.chunk_name} has no CID"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        # Stop campaign in Millis.ai
+        stop_success, stop_error = stop_campaign_millis(chunk.cid)
+        if not stop_success:
+            error_msg = stop_error or "Failed to stop chunk in Millis.ai"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        logger.info(f"[STOP_CHUNK] Successfully stopped chunk {chunk.chunk_name} (CID: {chunk.cid})")
+        
+        result_data = {
+            "chunk_id": chunk.id,
+            "chunk_name": chunk.chunk_name,
+            "cid": chunk.cid
+        }
+        
+        return True, None, result_data
+        
+    except Exception as e:
+        error_msg = f"Error stopping chunk: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg, None
+
+
+def get_chunk_status_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Get current status of a chunk from Millis.ai using the faster /info endpoint.
+    Updates the status in the database.
+    
+    Args:
+        db: Database session
+        chunk_id: Chunk ID in database
+    
+    Returns:
+        Tuple of (success, error_message, result_data with status)
+    """
+    logger.info(f"[GET_CHUNK_STATUS] Fetching status for chunk {chunk_id}")
+    
+    try:
+        from service.millis_api import get_campaign_info
+        
+        # Get chunk from database
+        chunk = db.query(Chunk).filter(Chunk.id == chunk_id).first()
+        if not chunk:
+            error_msg = f"Chunk {chunk_id} not found"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        if not chunk.cid:
+            # If no CID, return pending status
+            result_data = {
+                "chunk_id": chunk.id,
+                "chunk_name": chunk.chunk_name,
+                "status": "pending",
+                "cid": None
+            }
+            return True, None, result_data
+        
+        # Fetch status from Millis.ai using faster /info endpoint
+        success, error_msg, millis_data = get_campaign_info(chunk.cid)
+        
+        if success and millis_data:
+            new_status = millis_data.get('status', 'unknown')
+            
+            # Update chunk status in database
+            chunk.status = new_status
+            db.commit()
+            
+            logger.info(f"[GET_CHUNK_STATUS] Chunk {chunk.chunk_name}: status={new_status} (updated in DB)")
+            
+            result_data = {
+                "chunk_id": chunk.id,
+                "chunk_name": chunk.chunk_name,
+                "status": new_status,
+                "cid": chunk.cid
+            }
+            
+            return True, None, result_data
+        else:
+            error_msg = error_msg or f"Failed to fetch chunk {chunk.cid} info from Millis.ai"
+            logger.warning(error_msg)
+            return False, error_msg, None
+        
+    except Exception as e:
+        error_msg = f"Error fetching chunk status: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg, None
+

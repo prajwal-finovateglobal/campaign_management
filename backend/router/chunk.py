@@ -1,13 +1,16 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from database.dependencies import DB_DEPENDENCY
-from service.chunk import calculate_chunks, create_chunks, get_chunks_by_campaign, delete_chunks_by_campaign, upsert_all_chunks, upsert_single_chunk
+from service.chunk import calculate_chunks, create_chunks, get_chunks_by_campaign, delete_chunks_by_campaign, upsert_all_chunks, upsert_single_chunk, start_chunk_service, stop_chunk_service, get_chunk_status_service
 from schema.chunk import (
     CalculateChunksRequest, CalculateChunksResponse,
     CreateChunksRequest, CreateChunksResponse,
     GetChunksResponse,
     UpsertAllChunksRequest, UpsertAllChunksResponse,
-    UpsertSingleChunkRequest, UpsertSingleChunkResponse
+    UpsertSingleChunkRequest, UpsertSingleChunkResponse,
+    StartChunkRequest, StartChunkResponse,
+    StopChunkRequest, StopChunkResponse,
+    GetChunkStatusResponse
 )
 import loguru
 import json
@@ -429,5 +432,89 @@ def upsert_single_chunk_endpoint(request: UpsertSingleChunkRequest, db: DB_DEPEN
         cid=result["cid"],
         records_uploaded=result["records_uploaded"],
         status=result["status"]
+    )
+
+
+@router.post("/chunk/{chunk_id}/start", response_model=StartChunkResponse)
+def start_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
+    """
+    Start a single chunk campaign in Millis.ai.
+    
+    Args:
+        chunk_id: Chunk ID in database
+        db: Database session
+    
+    Returns:
+        StartChunkResponse with success status
+    """
+    logger.info(f"Starting chunk {chunk_id}")
+    
+    success, error_msg, result = start_chunk_service(db, chunk_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=error_msg or "Failed to start chunk")
+    
+    return StartChunkResponse(
+        success=True,
+        message=f"Successfully started chunk {result['chunk_name']}",
+        chunk_id=result["chunk_id"],
+        chunk_name=result["chunk_name"],
+        cid=result["cid"]
+    )
+
+
+@router.post("/chunk/{chunk_id}/stop", response_model=StopChunkResponse)
+def stop_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
+    """
+    Stop a single chunk campaign in Millis.ai.
+    
+    Args:
+        chunk_id: Chunk ID in database
+        db: Database session
+    
+    Returns:
+        StopChunkResponse with success status
+    """
+    logger.info(f"Stopping chunk {chunk_id}")
+    
+    success, error_msg, result = stop_chunk_service(db, chunk_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=error_msg or "Failed to stop chunk")
+    
+    return StopChunkResponse(
+        success=True,
+        message=f"Successfully stopped chunk {result['chunk_name']}",
+        chunk_id=result["chunk_id"],
+        chunk_name=result["chunk_name"],
+        cid=result["cid"]
+    )
+
+
+@router.get("/chunk/{chunk_id}/status", response_model=GetChunkStatusResponse)
+def get_chunk_status_endpoint(chunk_id: int, db: DB_DEPENDENCY):
+    """
+    Get current status of a chunk from Millis.ai.
+    
+    Args:
+        chunk_id: Chunk ID in database
+        db: Database session
+    
+    Returns:
+        GetChunkStatusResponse with chunk status
+    """
+    logger.info(f"Getting status for chunk {chunk_id}")
+    
+    success, error_msg, result = get_chunk_status_service(db, chunk_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=error_msg or "Failed to get chunk status")
+    
+    return GetChunkStatusResponse(
+        success=True,
+        chunk_id=result["chunk_id"],
+        chunk_name=result["chunk_name"],
+        status=result["status"],
+        cid=result["cid"]
     )
 

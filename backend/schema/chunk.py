@@ -84,3 +84,35 @@ class UpsertSingleChunkResponse(BaseModel):
     records_uploaded: int
     status: Optional[str] = None
 
+
+class StartChunkRequest(BaseModel):
+    chunk_id: int
+
+
+class StartChunkResponse(BaseModel):
+    success: bool
+    message: str
+    chunk_id: int
+    chunk_name: str
+    cid: Optional[str] = None
+
+
+class StopChunkRequest(BaseModel):
+    chunk_id: int
+
+
+class StopChunkResponse(BaseModel):
+    success: bool
+    message: str
+    chunk_id: int
+    chunk_name: str
+    cid: Optional[str] = None
+
+
+class GetChunkStatusResponse(BaseModel):
+    success: bool
+    chunk_id: int
+    chunk_name: str
+    status: str
+    cid: Optional[str] = None
+

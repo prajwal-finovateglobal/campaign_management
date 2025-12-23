@@ -9,6 +9,61 @@ import loguru
 
 logger = loguru.logger
 
+
+def calculate_campaign_status_from_chunks(chunks: List) -> str:
+    """
+    Calculate campaign status based on chunk statuses for multiple-type campaigns.
+    
+    Logic:
+    - If all chunks are idle → "idle"
+    - If some chunks are idle and some pending → "partly idle"
+    - If some are finished and some are (idle or started) → "partly finished"
+    - If some are started and some are idle → "chunks_started"
+    - If all chunks are finished → "finished"
+    - If all chunks are started → "started"
+    - If all chunks are pending → "pending"
+    
+    Args:
+        chunks: List of Chunk ORM objects
+    
+    Returns:
+        Campaign status string
+    """
+    if not chunks:
+        return "pending"
+    
+    # Count chunk statuses
+    status_counts = {}
+    for chunk in chunks:
+        chunk_status = chunk.status or "pending"
+        status_counts[chunk_status] = status_counts.get(chunk_status, 0) + 1
+    
+    total_chunks = len(chunks)
+    idle_count = status_counts.get("idle", 0)
+    pending_count = status_counts.get("pending", 0)
+    finished_count = status_counts.get("finished", 0)
+    started_count = status_counts.get("started", 0)
+    
+    # Apply status rules
+    if idle_count == total_chunks:
+        return "idle"
+    elif finished_count == total_chunks:
+        return "finished"
+    elif started_count == total_chunks:
+        return "started"
+    elif pending_count == total_chunks:
+        return "pending"
+    elif idle_count > 0 and pending_count > 0 and finished_count == 0 and started_count == 0:
+        return "partly idle"
+    elif finished_count > 0 and (idle_count > 0 or started_count > 0):
+        return "partly finished"
+    elif started_count > 0 and idle_count > 0:
+        return "chunks_started"
+    else:
+        # Default for mixed states not covered above
+        return "mixed"
+
+
 def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, phase_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get campaign data from the database with enriched record counts from Millis.ai API.
@@ -28,7 +83,7 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
         status = campaign.status if campaign.status else None
         campaign_type = campaign.type if campaign.type else 'single'
         
-        # For multiple-type campaigns, calculate record_count as sum of chunks
+        # For multiple-type campaigns, calculate record_count and status from chunks
         if campaign_type == 'multiple':
             from models.client import Chunk
             chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign.id).all()
@@ -36,10 +91,13 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
                 # Sum all chunks' records_count
                 chunk_records_sum = sum(chunk.records_count for chunk in chunks if chunk.records_count is not None)
                 record_count = chunk_records_sum
-                logger.debug(f"Campaign {campaign.id} (multiple): calculated record_count={record_count} from {len(chunks)} chunks")
+                # Calculate status based on chunk statuses
+                status = calculate_campaign_status_from_chunks(chunks)
+                logger.debug(f"Campaign {campaign.id} (multiple): calculated record_count={record_count}, status={status} from {len(chunks)} chunks")
             else:
                 record_count = 0
-                logger.debug(f"Campaign {campaign.id} (multiple): no chunks found, record_count=0")
+                status = "pending"
+                logger.debug(f"Campaign {campaign.id} (multiple): no chunks found, record_count=0, status=pending")
         
         campaign_dict = {
             'id': campaign.id,
@@ -273,6 +331,46 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             logger.error(error_msg)
             return False, error_msg, None
         
+        campaign_type = campaign.type if campaign.type else 'single'
+        
+        # Handle multiple-type campaigns differently
+        if campaign_type == 'multiple':
+            # For multiple-type campaigns, calculate status from chunks
+            from models.client import Chunk
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+            
+            if chunks:
+                # Calculate status and record count from chunks
+                new_status = calculate_campaign_status_from_chunks(chunks)
+                new_record_count = sum(chunk.records_count for chunk in chunks if chunk.records_count is not None)
+                logger.info(f"Campaign {campaign_id} (multiple): calculated status={new_status}, record_count={new_record_count} from {len(chunks)} chunks")
+            else:
+                new_status = "pending"
+                new_record_count = 0
+                logger.info(f"Campaign {campaign_id} (multiple): no chunks found, status=pending, record_count=0")
+            
+            # Update campaign in database
+            try:
+                campaign.status = new_status
+                # Note: For multiple-type campaigns, record_count is calculated from chunks, not stored in campaign
+                db.commit()
+                db.refresh(campaign)
+                logger.info(f"Campaign {campaign_id} updated in DB: status={new_status}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error updating campaign {campaign_id} in database: {e}")
+                return False, f"Error updating database: {str(e)}", None
+            
+            return True, None, {
+                'id': campaign.id,
+                'campaign_name': campaign.campaign_name,
+                'cid': campaign.cid,
+                'status': new_status,
+                'phase_id': campaign.phase_id,
+                'record_count': new_record_count
+            }
+        
+        # Handle single-type campaigns: fetch from Millis.ai
         if not campaign.cid:
             error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
             logger.error(error_msg)
@@ -365,16 +463,22 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
             campaign_type = campaign.type if campaign.type else 'single'
             record_count = campaign.records_count
             
-            # For multiple-type campaigns, calculate record_count as sum of chunks
+            # For multiple-type campaigns, calculate record_count and status from chunks
             if campaign_type == 'multiple':
                 from models.client import Chunk
                 chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign.id).all()
                 if chunks:
                     chunk_records_sum = sum(chunk.records_count for chunk in chunks if chunk.records_count is not None)
                     record_count = chunk_records_sum
-                    logger.debug(f"Campaign {campaign.id} (multiple): calculated record_count={record_count} from {len(chunks)} chunks")
+                    # Calculate status based on chunk statuses
+                    calculated_status = calculate_campaign_status_from_chunks(chunks)
+                    # Update campaign status in DB
+                    campaign.status = calculated_status
+                    logger.debug(f"Campaign {campaign.id} (multiple): calculated record_count={record_count}, status={calculated_status} from {len(chunks)} chunks")
                 else:
                     record_count = 0
+                    calculated_status = "pending"
+                    campaign.status = calculated_status
             
             campaign_dict = {
                 'id': campaign.id,
