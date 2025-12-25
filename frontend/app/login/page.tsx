@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { api, setAuthToken } from '@/lib/api';
 import { Loader2, Lock, User, Eye, EyeOff } from 'lucide-react';
 
@@ -12,6 +13,28 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [mounted, setMounted] = useState(false);
+
+  // Initialize theme from localStorage or system preference
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+      setTheme(initialTheme);
+      document.documentElement.setAttribute('data-theme', initialTheme);
+      setMounted(true);
+    }
+  }, []);
+
+  // Update theme when it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('theme', theme);
+    }
+  }, [theme]);
 
   // Check if already logged in
   useEffect(() => {
@@ -63,43 +86,66 @@ export default function LoginPage() {
     }
   };
 
+  if (!mounted) {
+    return null; // Prevent flash of unstyled content
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo and Title */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl shadow-lg mb-4">
-            <Lock className="w-10 h-10 text-white" />
+    <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Animated Matrix Grid Background */}
+      <div className="absolute inset-0 matrix-grid"></div>
+      
+      {/* Glowing Lines Animation */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none glow-lines-container">
+        <div className="glow-line line-1"></div>
+        <div className="glow-line line-2"></div>
+        <div className="glow-line line-3"></div>
+        <div className="glow-line line-4"></div>
+        <div className="glow-line line-5"></div>
+        <div className="glow-line line-6"></div>
+      </div>
+      
+      <div className="w-full max-w-md relative z-10">
+        {/* Logo and Title with animation */}
+        <div className="text-center mb-8 animate-fade-in-down">
+          <div className="inline-flex items-center justify-center mb-4 animate-scale-in">
+            <Image 
+              src="/logo.png" 
+              alt="Finovate Global Logo" 
+              width={80} 
+              height={80} 
+              className="object-contain logo-glow"
+            />
           </div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+          <h1 className="text-4xl font-bold text-[var(--foreground)] mb-2">
             Finovate Global
           </h1>
-          <p className="text-xl text-gray-600 font-medium">
+          <p className="text-xl text-[var(--secondary)] font-medium">
             Campaigns
           </p>
-          <p className="text-sm text-gray-500 mt-2">
+          <p className="text-sm text-[var(--secondary)] mt-2">
             Sign in to access your campaign management dashboard
           </p>
         </div>
 
-        {/* Login Card */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+        {/* Login Card with slide-up animation */}
+        <div className="bg-[var(--card-bg)] rounded-2xl shadow-xl p-8 border border-[var(--card-border)] animate-slide-up login-box-glow">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Error Message */}
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm animate-fade-in">
                 {error}
               </div>
             )}
 
             {/* Username Field */}
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="username" className="block text-sm font-medium text-[var(--foreground)] mb-2">
                 Username
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User className="h-5 w-5 text-gray-400" />
+                  <User className="h-5 w-5 text-[var(--secondary)]" />
                 </div>
                 <input
                   id="username"
@@ -107,7 +153,7 @@ export default function LoginPage() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-gray-900 bg-white placeholder:text-gray-400"
+                  className="block w-full pl-10 pr-3 py-3 border border-[var(--input-border)] rounded-lg focus:ring-2 focus:ring-[var(--primary)] focus:border-[var(--primary)] outline-none transition-colors text-[var(--foreground)] bg-[var(--input-bg)] placeholder:text-[var(--secondary)]"
                   placeholder="Enter your username"
                   disabled={loading}
                 />
@@ -116,12 +162,12 @@ export default function LoginPage() {
 
             {/* Password Field */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="password" className="block text-sm font-medium text-[var(--foreground)] mb-2">
                 Password
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
+                  <Lock className="h-5 w-5 text-[var(--secondary)]" />
                 </div>
                 <input
                   id="password"
@@ -129,14 +175,14 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-gray-900 bg-white placeholder:text-gray-400"
+                  className="block w-full pl-10 pr-10 py-3 border border-[var(--input-border)] rounded-lg focus:ring-2 focus:ring-[var(--primary)] focus:border-[var(--primary)] outline-none transition-colors text-[var(--foreground)] bg-[var(--input-bg)] placeholder:text-[var(--secondary)]"
                   placeholder="Enter your password"
                   disabled={loading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors"
                   tabIndex={-1}
                   disabled={loading}
                 >
@@ -153,7 +199,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+              className="w-full bg-[var(--primary)] text-white py-3 px-4 rounded-lg font-semibold hover:bg-[var(--primary-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:ring-offset-2 focus:ring-offset-[var(--card-bg)] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -167,10 +213,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Footer */}
-        <div className="mt-6 text-center text-sm text-gray-500">
-          <p>© 2024 Finovate Global. All rights reserved.</p>
-        </div>
+      
       </div>
     </div>
   );

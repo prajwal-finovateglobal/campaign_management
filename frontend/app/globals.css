@@ -18,8 +18,23 @@
   --table-row-hover: #f3f4f6;
 }
 
+[data-theme="dark"] {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --border: #334155;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --secondary: #94a3b8;
+  --card-bg: #1e293b;
+  --card-border: #334155;
+  --input-bg: #1e293b;
+  --input-border: #475569;
+  --table-header-bg: #1e293b;
+  --table-row-hover: #334155;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #0f172a;
     --foreground: #f1f5f9;
     --border: #334155;
@@ -123,4 +138,323 @@ body {
 .react-datepicker__time-list-item--selected {
   background: var(--primary);
   color: white;
+}
+
+/* Login Page Animations */
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in-down {
+  animation: fade-in-down 0.6s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.5s ease-out 0.2s both;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s ease-out 0.1s both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Logo Glow Effect */
+.logo-glow {
+  filter: drop-shadow(0 0 10px var(--primary)) 
+          drop-shadow(0 0 20px var(--primary)) 
+          drop-shadow(0 0 30px var(--primary));
+  animation: logo-pulse 5s ease-in-out infinite;
+}
+
+@keyframes logo-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 10px var(--primary)) 
+            drop-shadow(0 0 20px var(--primary)) 
+            drop-shadow(0 0 30px var(--primary));
+  }
+  50% {
+    filter: drop-shadow(0 0 15px var(--primary)) 
+            drop-shadow(0 0 30px var(--primary)) 
+            drop-shadow(0 0 45px var(--primary));
+  }
+}
+
+/* Login Box Glow Effect - Smaller radius with 60% opacity */
+.login-box-glow {
+  box-shadow: 0 0 2px rgba(37, 99, 235, 0.6),
+              0 0 4px rgba(37, 99, 235, 0.6),
+              0 0 6px rgba(37, 99, 235, 0.6),
+              0 0 8px rgba(37, 99, 235, 0.4),
+              0 0 10px rgba(37, 99, 235, 0.3);
+  animation: login-box-pulse 5s ease-in-out infinite;
+}
+
+[data-theme="dark"] .login-box-glow {
+  animation: login-box-pulse-dark 5s ease-in-out infinite;
+}
+
+@keyframes login-box-pulse {
+  0%, 100% {
+    box-shadow: 0 0 2px rgba(37, 99, 235, 0.6),
+                0 0 4px rgba(37, 99, 235, 0.6),
+                0 0 6px rgba(37, 99, 235, 0.6),
+                0 0 8px rgba(37, 99, 235, 0.4),
+                0 0 10px rgba(37, 99, 235, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 6px rgba(37, 99, 235, 0.6),
+                0 0 12px rgba(37, 99, 235, 0.6),
+                0 0 16px rgba(37, 99, 235, 0.6),
+                0 0 20px rgba(37, 99, 235, 0.4),
+                0 0 24px rgba(37, 99, 235, 0.3);
+  }
+}
+
+@keyframes login-box-pulse-dark {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(59, 130, 246, 0.6),
+                0 0 8px rgba(59, 130, 246, 0.6),
+                0 0 12px rgba(59, 130, 246, 0.6),
+                0 0 16px rgba(59, 130, 246, 0.4),
+                0 0 20px rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.6),
+                0 0 12px rgba(59, 130, 246, 0.6),
+                0 0 16px rgba(59, 130, 246, 0.6),
+                0 0 20px rgba(59, 130, 246, 0.4),
+                0 0 24px rgba(59, 130, 246, 0.3);
+  }
+}
+
+/* Matrix Grid Animation for Login Page */
+.matrix-grid {
+  background-image: 
+    linear-gradient(var(--primary) 1px, transparent 1px),
+    linear-gradient(90deg, var(--primary) 1px, transparent 1px);
+  background-size: 50px 50px;
+  opacity: 0.05;
+  animation: matrix-pulse 4s ease-in-out infinite;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 70%);
+}
+
+[data-theme="dark"] .matrix-grid {
+  opacity: 0.08;
+}
+
+@keyframes matrix-pulse {
+  0%, 100% {
+    opacity: 0.05;
+  }
+  50% {
+    opacity: 0.1;
+  }
+}
+
+[data-theme="dark"] .matrix-grid {
+  animation: matrix-pulse-dark 4s ease-in-out infinite;
+}
+
+@keyframes matrix-pulse-dark {
+  0%, 100% {
+    opacity: 0.08;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* Glowing Lines Animation */
+.glow-lines-container {
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 70%);
+}
+
+.glow-line {
+  position: absolute;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--primary),
+    transparent
+  );
+  opacity: 0;
+  pointer-events: none;
+  filter: blur(1px);
+}
+
+/* Vertical lines - aligned to grid (left positions: multiples of 50px) */
+.glow-line.line-1 {
+  width: 1px;
+  height: 200px; /* 4 grid units */
+  top: 200px; /* 4 grid units from top - aligned to grid */
+  left: 150px; /* 3 grid units - aligned to grid */
+  animation: glow-line-vertical 8s ease-in-out infinite;
+  animation-delay: 0s;
+}
+
+.glow-line.line-3 {
+  width: 1px;
+  height: 150px; /* 3 grid units */
+  top: 250px; /* 5 grid units from top - aligned to grid */
+  left: 250px; /* 5 grid units - aligned to grid */
+  animation: glow-line-vertical 9s ease-in-out infinite;
+  animation-delay: 3s;
+}
+
+.glow-line.line-5 {
+  width: 1px;
+  height: 200px; /* 4 grid units */
+  top: 150px; /* 3 grid units from top - aligned to grid */
+  right: 200px; /* 4 grid units from right - aligned to grid */
+  animation: glow-line-vertical 7s ease-in-out infinite;
+  animation-delay: 6s;
+}
+
+/* Horizontal lines - aligned to grid (top positions: multiples of 50px) */
+.glow-line.line-2 {
+  width: 200px; /* 4 grid units */
+  height: 1px;
+  top: 200px; /* 4 grid units from top - aligned to grid */
+  left: 200px; /* 4 grid units - aligned to grid */
+  animation: glow-line-horizontal 10s ease-in-out infinite;
+  animation-delay: 1.5s;
+}
+
+.glow-line.line-4 {
+  width: 200px; /* 4 grid units */
+  height: 1px;
+  top: 300px; /* 6 grid units from top - aligned to grid */
+  left: 150px; /* 3 grid units - aligned to grid */
+  animation: glow-line-horizontal 11s ease-in-out infinite;
+  animation-delay: 4.5s;
+}
+
+.glow-line.line-6 {
+  width: 150px; /* 3 grid units */
+  height: 1px;
+  top: 250px; /* 5 grid units from top - aligned to grid */
+  left: 250px; /* 5 grid units - aligned to grid */
+  animation: glow-line-horizontal 9s ease-in-out infinite;
+  animation-delay: 2s;
+}
+
+@keyframes glow-line-vertical {
+  0%, 100% {
+    opacity: 0;
+    transform: translateY(-50px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translateY(50px);
+  }
+}
+
+@keyframes glow-line-horizontal {
+  0%, 100% {
+    opacity: 0;
+    transform: translateX(-50px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translateX(50px);
+  }
+}
+
+[data-theme="dark"] .glow-line {
+  filter: blur(1.5px);
+}
+
+[data-theme="dark"] .glow-line.line-1 {
+  animation: glow-line-vertical-dark 8s ease-in-out infinite;
+  animation-delay: 0s;
+}
+
+[data-theme="dark"] .glow-line.line-2 {
+  animation: glow-line-horizontal-dark 10s ease-in-out infinite;
+  animation-delay: 1.5s;
+}
+
+[data-theme="dark"] .glow-line.line-3 {
+  animation: glow-line-vertical-dark 9s ease-in-out infinite;
+  animation-delay: 3s;
+}
+
+[data-theme="dark"] .glow-line.line-4 {
+  animation: glow-line-horizontal-dark 11s ease-in-out infinite;
+  animation-delay: 4.5s;
+}
+
+[data-theme="dark"] .glow-line.line-5 {
+  animation: glow-line-vertical-dark 7s ease-in-out infinite;
+  animation-delay: 6s;
+}
+
+[data-theme="dark"] .glow-line.line-6 {
+  animation: glow-line-horizontal-dark 9s ease-in-out infinite;
+  animation-delay: 2s;
+}
+
+@keyframes glow-line-vertical-dark {
+  0%, 100% {
+    opacity: 0;
+    transform: translateY(-50px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translateY(50px);
+  }
+}
+
+@keyframes glow-line-horizontal-dark {
+  0%, 100% {
+    opacity: 0;
+    transform: translateX(-50px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translateX(50px);
+  }
 }

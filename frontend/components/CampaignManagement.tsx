@@ -2717,6 +2717,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--secondary)] pointer-events-none" />
               </div>
+              {/* Record Count */}
+              <span className="text-sm text-[var(--foreground)] whitespace-nowrap font-medium">
+                ({filteredData.length + newRecords.length} {filteredData.length + newRecords.length === 1 ? 'record' : 'records'})
+              </span>
             </div>
 
             {/* Add Record Button - Only show in edit mode */}
@@ -3564,14 +3568,18 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               </h3>
               <button
                 onClick={() => {
-                  if (!isAutoStarting) {
-                    setAutoStartModal({ show: false, campaign: null });
-                    setAutoStartChunks([]);
-                    setAutoStartProgress({});
+                  if (isAutoStarting) {
+                    // If auto-start is running, stop it first (same as "Stop Auto Start" button)
+                    console.log('[AUTO_START] Stop requested by user via X button');
+                    setShouldStopAutoStart(true);
+                    shouldStopAutoStartRef.current = true; // Also update ref for immediate access
                   }
+                  // Close the modal
+                  setAutoStartModal({ show: false, campaign: null });
+                  setAutoStartChunks([]);
+                  setAutoStartProgress({});
                 }}
-                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors disabled:opacity-50"
-                disabled={isAutoStarting}
+                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
               >
                 <X className="w-5 h-5 text-[var(--secondary)]" />
               </button>

@@ -9,6 +9,7 @@ from router.phase import router as phase_router
 from router.campaign import router as campaign_router
 from router.chunk import router as chunk_router
 from router.disposition import router as disposition_router
+from router.translation import router as translation_router
 from router.auth import router as auth_router, is_session_valid
 
 # Import all models at startup to ensure SQLAlchemy can resolve relationships
@@ -102,6 +103,7 @@ app.include_router(phase_router)
 app.include_router(campaign_router)
 app.include_router(chunk_router)
 app.include_router(disposition_router)
+app.include_router(translation_router)
 
 @app.get("/")
 def read_root():

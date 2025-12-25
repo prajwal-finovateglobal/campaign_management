@@ -48,11 +48,17 @@ backend/logs/
 *.csv
 backend/data/*.csv
 !backend/data/data.csv.example
+data.csv
+data copy.csv
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+
+# Sensitive data files (disposition shares, JSON data)
+backend/data/disposition_shares/*.json
+!backend/data/disposition_shares/.gitkeep
 
 # OS
 Thumbs.db
