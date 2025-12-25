@@ -11,7 +11,7 @@ import { CSVPreviewModal } from '@/components/CSVPreviewModal';
 import { CampaignManagement } from '@/components/CampaignManagement';
 import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
-import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon } from 'lucide-react';
+import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
 
 interface DataLog {
@@ -925,7 +925,10 @@ export default function Home() {
                   </button>
                   {/* Warning tooltip */}
                   <div className="absolute bottom-full left-0 mb-2 w-64 p-2 bg-yellow-100 border border-yellow-400 rounded-md shadow-lg text-xs text-yellow-800 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                    <div className="font-semibold mb-1">⚠️ Warning</div>
+                    <div className="font-semibold mb-1 flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4" />
+                      Warning
+                    </div>
                     <div>This will permanently delete rows from data.csv that match the contact_to or phone values from the currently displayed data.</div>
                   </div>
                   {cutCCDMessage && (

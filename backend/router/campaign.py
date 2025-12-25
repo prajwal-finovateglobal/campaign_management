@@ -5,6 +5,7 @@ from service.millis_api import get_phones, get_agent
 from schema.campaign import CreateCampaignRequest, CreateCampaignResponse, RefreshCampaignStatusResponse, DeleteCampaignResponse, UploadRecordsRequest, UploadRecordsResponse, GetPhonesResponse, GetAgentResponse, SetCallerRequest, SetCallerResponse, StartCampaignRequest, StartCampaignResponse, StopCampaignRequest, StopCampaignResponse, DeleteRecordRequest, DeleteRecordResponse
 from typing import Optional
 import loguru
+import requests
 
 router = APIRouter()
 logger = loguru.logger
@@ -473,3 +474,53 @@ def delete_record_endpoint(request: DeleteRecordRequest, db: DB_DEPENDENCY = Non
         success=True,
         message=f"Successfully deleted record {request.phone}"
     )
+
+
+@router.get("/campaign/launch-status")
+def check_launch_status():
+    """
+    Check the launch status from Avio API health endpoint.
+    This endpoint proxies the request to avoid CORS issues.
+    
+    Returns:
+        Health status from Avio API
+    """
+    logger.info("Checking launch status from Avio API")
+    
+    try:
+        response = requests.get(
+            "https://avio.finovateglobal.com/api/health",
+            headers={"accept": "application/json"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "success": True,
+                "status": data.get("status", "unknown"),
+                "data": data
+            }
+        else:
+            return {
+                "success": False,
+                "status": "error",
+                "message": f"Avio API returned status code {response.status_code}",
+                "data": None
+            }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error checking launch status: {str(e)}")
+        return {
+            "success": False,
+            "status": "error",
+            "message": f"Failed to connect to Avio API: {str(e)}",
+            "data": None
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error checking launch status: {str(e)}")
+        return {
+            "success": False,
+            "status": "error",
+            "message": f"Unexpected error: {str(e)}",
+            "data": None
+        }

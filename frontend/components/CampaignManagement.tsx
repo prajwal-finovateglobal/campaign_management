@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database, Play, Clock, XCircle } from 'lucide-react';
+import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database, Play, Clock, XCircle, Network, FileText, BarChart, Info } from 'lucide-react';
 import { DataTable } from './DataTable';
 import { api } from '@/lib/api';
 
@@ -202,6 +202,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   }>>({});
   const [startingIndividualChunk, setStartingIndividualChunk] = useState<number | null>(null);
   const [refreshingChunkStatuses, setRefreshingChunkStatuses] = useState(false);
+  
+  // Launch status check states
+  const [checkingLaunchStatus, setCheckingLaunchStatus] = useState(false);
+  const [launchStatusMessage, setLaunchStatusMessage] = useState<{ type: 'success' | 'error' | null; text: string }>({ type: null, text: '' });
   
   // Upload metadata states
   const [uploadMetadataEnabled, setUploadMetadataEnabled] = useState(false);
@@ -883,7 +887,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       ...prev,
       [chunkId]: {
         status: 'finished',
-        message: 'Countdown completed, moving to next chunk ✓'
+        message: 'Countdown completed, moving to next chunk'
       }
     }));
   };
@@ -942,7 +946,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               ...prev,
               [chunk.id]: {
                 status: 'finished',
-                message: 'Already finished (skipped, no timer) ✓'
+                message: 'Already finished (skipped, no timer)'
               }
             }));
             
@@ -984,7 +988,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               ...prev,
               [chunk.id]: {
                 status: 'finished',
-                message: 'Chunk finished (no timer - already started) ✓'
+                message: 'Chunk finished (no timer - already started)'
               }
             }));
             
@@ -1058,7 +1062,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               ...prev,
               [chunk.id]: {
                 status: 'finished',
-                message: 'Chunk finished (full cycle completed) ✓'
+                message: 'Chunk finished (full cycle completed)'
               }
             }));
             
@@ -1176,6 +1180,44 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Function to check launch status from Avio API (via backend proxy)
+  const handleCheckLaunchStatus = async () => {
+    setCheckingLaunchStatus(true);
+    setLaunchStatusMessage({ type: null, text: '' });
+    
+    try {
+      const response = await api.get('/campaign/launch-status');
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.success && result.status === 'healthy') {
+        setLaunchStatusMessage({
+          type: 'success',
+          text: 'Ready to go! Launch status is healthy. All systems operational.',
+        });
+      } else {
+        const errorMsg = result.message || 'Launch status is not healthy. Callback URL might be failing or system is experiencing issues.';
+        setLaunchStatusMessage({
+          type: 'error',
+          text: `Not ready. ${errorMsg}`,
+        });
+      }
+    } catch (error: any) {
+      console.error('Error checking launch status:', error);
+      setLaunchStatusMessage({
+        type: 'error',
+        text: `Not ready. Failed to check launch status: ${error.message || 'Callback URL might be failing or network error occurred.'}`,
+      });
+    } finally {
+      setCheckingLaunchStatus(false);
     }
   };
 
@@ -1344,8 +1386,9 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                       <AlertTriangle className="w-4 h-4 text-[var(--danger)] inline mr-1" />
                       <strong className="text-[var(--danger)]">Warning:</strong> Enable this to manually upload metadata CSV.
                     </p>
-                    <p className="text-xs text-[var(--danger)] font-semibold">
-                      ⚠️ This will delete all existing records in data.csv and replace them with the uploaded data.
+                    <p className="text-xs text-[var(--danger)] font-semibold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      This will delete all existing records in data.csv and replace them with the uploaded data.
                     </p>
                   </div>
                 </div>
@@ -2365,8 +2408,9 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                   {campaignIdMessage}
                                 </div>
                               )}
-                              <p className="text-xs text-[var(--secondary)] mt-2">
-                                ℹ️ This sets the campaign ID in data.csv so records are associated with this campaign
+                              <p className="text-xs text-[var(--secondary)] mt-2 flex items-center gap-1">
+                                <Info className="w-3 h-3" />
+                                This sets the campaign ID in data.csv so records are associated with this campaign
                               </p>
                             </div>
                           </div>
@@ -2436,7 +2480,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                           <div className="space-y-4">
                             <div className="p-4 bg-[var(--card-bg)] rounded-md border border-[var(--card-border)]">
                               <h4 className="text-sm font-semibold text-[var(--foreground)] mb-3 flex items-center gap-2">
-                                📊 Chunks Preview
+                                <BarChart className="w-4 h-4" />
+                                Chunks Preview
                               </h4>
                               <div className="grid grid-cols-2 gap-4 mb-3">
                                 <div>
@@ -3117,7 +3162,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 </div>
               ) : (
                 <div className="p-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded-md text-sm">
-                  <p className="font-semibold mb-1">⚠️ No records found for this campaign</p>
+                  <p className="font-semibold mb-1 flex items-center gap-1">
+                    <AlertTriangle className="w-4 h-4" />
+                    No records found for this campaign
+                  </p>
                   <p className="text-xs">Campaign ID: {upsertConfirmModal.campaignId}</p>
                   <p className="text-xs mt-1">
                     Make sure you've clicked "Set CID" button to set the campaign_id in data.csv before upserting.
@@ -3503,8 +3551,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               'text-[var(--secondary)]'
                             }`}>
                               {isProcessing && <Loader2 className="w-3 h-3 inline animate-spin mr-1" />}
-                              {isFinished && '✓ '}
-                              {isFailed && '✗ '}
+                              {isFinished && <CheckCircle2 className="w-3 h-3 inline mr-1" />}
+                              {isFailed && <XCircle className="w-3 h-3 inline mr-1" />}
                               {progress.message}
                             </span>
                           )}
@@ -3542,14 +3590,18 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                     );
                   })}
                   {totalChunksCount > 10 && (
-                    <p className="text-xs text-[var(--secondary)] italic mt-4">
-                      📝 Showing first 10 of {totalChunksCount} chunks. All {totalChunksCount} chunks will be upserted when you confirm.
+                    <p className="text-xs text-[var(--secondary)] italic mt-4 flex items-center gap-1">
+                      <FileText className="w-3 h-3" />
+                      Showing first 10 of {totalChunksCount} chunks. All {totalChunksCount} chunks will be upserted when you confirm.
                     </p>
                   )}
                 </div>
               ) : (
                 <div className="p-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded-md text-sm">
-                  <p className="font-semibold mb-1">⚠️ No chunks found for this campaign</p>
+                  <p className="font-semibold mb-1 flex items-center gap-1">
+                    <AlertTriangle className="w-4 h-4" />
+                    No chunks found for this campaign
+                  </p>
                   <p className="text-xs">Please create chunks first before upserting.</p>
                 </div>
               )}
@@ -3578,6 +3630,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   setAutoStartModal({ show: false, campaign: null });
                   setAutoStartChunks([]);
                   setAutoStartProgress({});
+                  setLaunchStatusMessage({ type: null, text: '' });
                 }}
                 className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
               >
@@ -3690,6 +3743,42 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   <li>Starts the next chunk</li>
                   <li>Repeats until all chunks are completed</li>
                 </ol>
+              </div>
+
+              {/* Launch Status Check */}
+              <div className="mt-4 space-y-2">
+                <button
+                  onClick={handleCheckLaunchStatus}
+                  disabled={checkingLaunchStatus}
+                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {checkingLaunchStatus ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Checking Launch Status...
+                    </>
+                  ) : (
+                    <>
+                      <Network className="w-4 h-4" />
+                      Check Launch Status
+                    </>
+                  )}
+                </button>
+                
+                  {launchStatusMessage.type && (
+                    <div className={`p-3 rounded-md border flex items-start gap-2 ${
+                      launchStatusMessage.type === 'success'
+                        ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400'
+                        : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+                    }`}>
+                      {launchStatusMessage.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      )}
+                      <p className="text-xs font-medium">{launchStatusMessage.text}</p>
+                    </div>
+                  )}
               </div>
             </div>
 
@@ -3963,7 +4052,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 {campaignActionModal.action === 'start' ? 'Start Campaign' : 'Stop Campaign'}
               </h3>
               <button
-                onClick={() => setCampaignActionModal({ show: false, action: null, campaign: null })}
+                onClick={() => {
+                  setCampaignActionModal({ show: false, action: null, campaign: null });
+                  setLaunchStatusMessage({ type: null, text: '' });
+                }}
                 className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
                 disabled={startingCampaign === campaignActionModal.campaign?.id}
               >
@@ -4040,11 +4132,47 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   </p>
                 </div>
               )}
+
+              {/* Launch Status Check */}
+              {campaignActionModal.action === 'start' && (
+                <div className="mt-4 space-y-2">
+                  <button
+                    onClick={handleCheckLaunchStatus}
+                    disabled={checkingLaunchStatus}
+                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {checkingLaunchStatus ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Checking Launch Status...
+                      </>
+                    ) : (
+                      <>
+                        <Network className="w-4 h-4" />
+                        Check Launch Status
+                      </>
+                    )}
+                  </button>
+                  
+                  {launchStatusMessage.type && (
+                    <div className={`p-3 rounded-md border ${
+                      launchStatusMessage.type === 'success'
+                        ? 'bg-green-500/10 border-green-500/20 text-green-600'
+                        : 'bg-red-500/10 border-red-500/20 text-red-600'
+                    }`}>
+                      <p className="text-xs font-medium">{launchStatusMessage.text}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex items-center gap-3 justify-end">
               <button
-                onClick={() => setCampaignActionModal({ show: false, action: null, campaign: null })}
+                onClick={() => {
+                  setCampaignActionModal({ show: false, action: null, campaign: null });
+                  setLaunchStatusMessage({ type: null, text: '' });
+                }}
                 disabled={startingCampaign === campaignActionModal.campaign?.id}
                 className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -4255,7 +4383,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               {/* Preview */}
               {chunksPreview && (
                 <div className="p-4 bg-[var(--table-header-bg)] rounded-md border border-[var(--card-border)]">
-                  <h3 className="text-sm font-semibold text-[var(--foreground)] mb-2">📊 Preview:</h3>
+                  <h3 className="text-sm font-semibold text-[var(--foreground)] mb-2 flex items-center gap-2">
+                    <BarChart className="w-4 h-4" />
+                    Preview:
+                  </h3>
                   <div className="space-y-1 text-sm text-[var(--foreground)]">
                     <p>• Total Records: <span className="font-bold">{chunksPreview.total_records}</span></p>
                     <p>• Chunk Size: <span className="font-bold">{chunksPreview.chunk_size}</span></p>
@@ -4401,8 +4532,9 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                         </td>
                         <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
                           {chunk.upload_status === 'done' ? (
-                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 rounded text-xs font-medium">
-                              ✓ Done
+                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 rounded text-xs font-medium flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Done
                             </span>
                           ) : (
                             <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded text-xs font-medium">
@@ -4495,8 +4627,9 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   </svg>
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-yellow-800 dark:text-yellow-400">
-                    ⚠️ Chunks Not Upserted
+                  <h2 className="text-lg font-semibold text-yellow-800 dark:text-yellow-400 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    Chunks Not Upserted
                   </h2>
                   <p className="text-sm text-yellow-700 dark:text-yellow-500">
                     Please upload records to chunks before setting phone number
