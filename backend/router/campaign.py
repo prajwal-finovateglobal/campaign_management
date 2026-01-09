@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from database.dependencies import DB_DEPENDENCY
 from service.campaign import get_campaign_service, create_campaign_service, refresh_campaign_status, refresh_all_campaigns_status, delete_campaign_service, upload_csv_records_to_campaign, set_caller_service, start_campaign_service, stop_campaign_service, delete_record_service
 from service.millis_api import get_phones, get_agent
-from schema.campaign import CreateCampaignRequest, CreateCampaignResponse, RefreshCampaignStatusResponse, DeleteCampaignResponse, UploadRecordsRequest, UploadRecordsResponse, GetPhonesResponse, GetAgentResponse, SetCallerRequest, SetCallerResponse, StartCampaignRequest, StartCampaignResponse, StopCampaignRequest, StopCampaignResponse, DeleteRecordRequest, DeleteRecordResponse
+from schema.campaign import CreateCampaignRequest, CreateCampaignResponse, RefreshCampaignStatusResponse, DeleteCampaignResponse, UploadRecordsRequest, UploadRecordsResponse, GetPhonesResponse, GetAgentResponse, SetCallerRequest, SetCallerResponse, StartCampaignRequest, StartCampaignResponse, StopCampaignRequest, StopCampaignResponse, DeleteRecordRequest, DeleteRecordResponse, UpdateCampaignRangeRequest, UpdateCampaignRangeResponse
 from typing import Optional
 import loguru
 import requests
@@ -76,7 +76,10 @@ def create_campaign(
         db,
         request.phase_id,
         request.phase_name,
-        request.campaign_type
+        request.campaign_type,
+        request.is_full,
+        request.idx,
+        request.size
     )
     
     if not success:
@@ -97,6 +100,8 @@ def create_campaign(
         record_count=campaign_data['record_count'],
         phase_id=campaign_data['phase_id'],
         type=campaign_data.get('type', 'single'),
+        idx=campaign_data.get('idx'),
+        size=campaign_data.get('size'),
         message=f"Successfully created campaign: {campaign_data['campaign_name']}"
     )
 
@@ -524,3 +529,143 @@ def check_launch_status():
             "message": f"Unexpected error: {str(e)}",
             "data": None
         }
+
+
+@router.post("/campaign/update-range", response_model=UpdateCampaignRangeResponse)
+def update_campaign_range(
+    request: UpdateCampaignRangeRequest,
+    db: DB_DEPENDENCY = None
+):
+    """
+    Update the idx and size (range) for an existing campaign.
+    
+    Args:
+        request: UpdateCampaignRangeRequest with campaign_id, is_full, idx, and size
+        db: Database session
+    
+    Returns:
+        UpdateCampaignRangeResponse with updated range information
+    """
+    logger.info(f"Updating range for campaign_id: {request.campaign_id}, is_full: {request.is_full}, idx: {request.idx}, size: {request.size}")
+    
+    try:
+        from models.client import Campaign
+        from service.csv_service import get_csv_row_count
+        
+        # Get campaign from database
+        campaign = db.query(Campaign).filter(Campaign.id == request.campaign_id).first()
+        if not campaign:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "success": False,
+                    "message": f"Campaign with id {request.campaign_id} not found"
+                }
+            )
+        
+        # Handle idx and size based on is_full flag
+        final_idx = 0
+        final_size = 0
+        
+        if request.is_full:
+            # Full mode: get total CSV row count and set idx=0, size=total
+            csv_success, csv_error, total_rows = get_csv_row_count()
+            if not csv_success:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "success": False,
+                        "message": f"Failed to get CSV row count: {csv_error}"
+                    }
+                )
+            final_idx = 0
+            final_size = total_rows
+            logger.info(f"Full mode: Setting idx=0, size={total_rows}")
+        else:
+            # Partial mode: validate provided idx and size
+            if request.idx is None or request.size is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "success": False,
+                        "message": "idx and size are required when is_full=False"
+                    }
+                )
+            
+            if request.idx < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "success": False,
+                        "message": f"idx must be >= 0, got {request.idx}"
+                    }
+                )
+            
+            if request.size <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "success": False,
+                        "message": f"size must be > 0, got {request.size}"
+                    }
+                )
+            
+            # Get CSV row count to validate range
+            csv_success, csv_error, total_rows = get_csv_row_count()
+            if not csv_success:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "success": False,
+                        "message": f"Failed to get CSV row count: {csv_error}"
+                    }
+                )
+            
+            if request.idx >= total_rows:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "success": False,
+                        "message": f"idx ({request.idx}) must be less than total CSV rows ({total_rows}). Valid range: 0 to {total_rows - 1}"
+                    }
+                )
+            
+            # Auto-adjust size if it exceeds CSV bounds (like Python list slicing)
+            if request.idx + request.size > total_rows:
+                adjusted_size = total_rows - request.idx
+                logger.info(f"Size ({request.size}) exceeds CSV bounds. Auto-adjusting to {adjusted_size} (from index {request.idx} to end of CSV)")
+                final_size = adjusted_size
+            else:
+                final_size = request.size
+            
+            final_idx = request.idx
+            logger.info(f"Partial mode: Setting idx={final_idx}, size={final_size} (records {final_idx} to {final_idx + final_size - 1})")
+        
+        # Update campaign
+        campaign.idx = final_idx
+        campaign.size = final_size
+        db.commit()
+        db.refresh(campaign)
+        
+        logger.info(f"Successfully updated range for campaign {request.campaign_id}: idx={final_idx}, size={final_size}")
+        
+        return UpdateCampaignRangeResponse(
+            success=True,
+            message=f"Successfully updated range: idx={final_idx}, size={final_size}",
+            idx=final_idx,
+            size=final_size
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        error_msg = f"Error updating campaign range: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "message": error_msg
+            }
+        )

@@ -294,6 +294,37 @@ def read_csv_data() -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]
         return False, error_msg, None
 
 
+def get_csv_row_count() -> Tuple[bool, Optional[str], int]:
+    """
+    Get the total number of rows in the CSV file (excluding header).
+    
+    Returns:
+        Tuple of (success, error_message, row_count)
+        - success: Whether operation succeeded
+        - error_message: Error message if failed, None if succeeded
+        - row_count: Number of rows in CSV (0 if empty or doesn't exist)
+    """
+    try:
+        if not DATA_CSV_PATH.exists():
+            return True, None, 0
+        
+        if is_csv_empty():
+            return True, None, 0
+        
+        row_count = 0
+        with open(DATA_CSV_PATH, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for _ in reader:
+                row_count += 1
+        
+        logger.info(f"CSV has {row_count} rows")
+        return True, None, row_count
+    except Exception as e:
+        error_msg = f"Error counting CSV rows: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg, 0
+
+
 def clear_csv() -> Tuple[bool, Optional[str], bool]:
     """
     Clear all data from CSV file (keeps header if exists).

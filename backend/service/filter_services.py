@@ -13,7 +13,7 @@ from repo.filters import (
     filter_by_language,
     filter_by_duration,
     filter_by_phase_id,
-    filter_by_campaign_id
+    filter_by_campaign_ids
 )
 from schema.tables import ShowDataRequest
 import loguru
@@ -103,7 +103,11 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     Returns:
         List of dictionaries with filtered data, including human-readable datetime fields
     """
+    logger.info(f"=== filter_data FUNCTION CALLED ===")
     logger.info(f"Filtering data with request: {request}")
+    logger.info(f"request.campaign_ids: {request.campaign_ids} (type: {type(request.campaign_ids)})")
+    logger.info(f"request.campaign_id: {request.campaign_id}")
+    logger.info(f"request.phase_id: {request.phase_id}")
     
     # Extract filter parameters
     start_time = request.start_time
@@ -118,6 +122,11 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     table_name = request.table_name
     phase_id = request.phase_id
     campaign_id = request.campaign_id
+    campaign_ids = request.campaign_ids  # IMPORTANT: Extract from request object
+    
+    logger.info(f"Extracted campaign_ids variable: {campaign_ids} (type: {type(campaign_ids)})")
+    logger.info(f"Extracted campaign_id variable: {campaign_id}")
+    logger.info(f"Extracted phase_id variable: {phase_id}")
     logger.info(f"Start time: {start_time}")
     logger.info(f"End time: {end_time}")
     logger.info(f"Connected status: {con_status}")
@@ -130,6 +139,7 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     logger.info(f"Table name: {table_name}")
     logger.info(f"Phase ID: {phase_id}")
     logger.info(f"Campaign ID: {campaign_id}")
+    logger.info(f"Campaign IDs: {campaign_ids}")
     
     # Define columns to select
     columns = [
@@ -222,22 +232,60 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
                 logger.warning(f"WARNING: No campaigns found with phase_id={phase_id}. This will result in 0 rows due to INNER JOIN.")
             
             # Also check if there are any records with campaign_ids that match these campaigns
+            # NOTE: Use different variable name to avoid overwriting request.campaign_ids!
             if client_id is not None:
                 from repo.tables import get_datalog_model_for_client
                 DataLogModel = get_datalog_model_for_client(db, client_id)
                 if DataLogModel:
-                    campaign_ids = [c.id for c in db.query(Campaign).filter(Campaign.phase_id == phase_id).all()]
-                    if campaign_ids:
-                        records_with_campaigns = db.query(DataLogModel).filter(DataLogModel.campaign_id.in_(campaign_ids)).count()
+                    phase_campaign_ids = [c.id for c in db.query(Campaign).filter(Campaign.phase_id == phase_id).all()]
+                    if phase_campaign_ids:
+                        records_with_campaigns = db.query(DataLogModel).filter(DataLogModel.campaign_id.in_(phase_campaign_ids)).count()
                         logger.info(f"Records in table with campaign_ids matching phase_id={phase_id}: {records_with_campaigns}")
         except Exception as e:
             logger.warning(f"Could not check campaign diagnostics: {e}")
     
-    query = filter_by_phase_id(query, phase_id)
-    logger.info(f"Query after phase_id filter: {query is not None}")
+    # Handle campaign_ids logic:
+    # 1. If campaign_ids is provided (even empty list), use it directly
+    # 2. If campaign_ids is None/empty but phase_id is set, get all campaign_ids from that phase (for "All campaigns")
+    # 3. Always use campaign_ids (array) with IN clause for consistency
+    final_campaign_ids = None
     
-    query = filter_by_campaign_id(query, campaign_id)
-    logger.info(f"Query after campaign_id filter: {query is not None}")
+    logger.info(f"=== CAMPAIGN FILTER LOGIC ===")
+    logger.info(f"Received - campaign_ids: {campaign_ids} (type: {type(campaign_ids)}), campaign_id: {campaign_id}, phase_id: {phase_id}")
+    
+    if campaign_ids is not None:
+        if len(campaign_ids) > 0:
+            # Use provided campaign_ids (specific campaigns selected)
+            final_campaign_ids = campaign_ids
+            logger.info(f"✅ Using provided campaign_ids (specific selection): {final_campaign_ids}")
+        else:
+            # Empty list means no campaigns selected - don't filter by campaigns
+            logger.info("⚠️ campaign_ids is empty list - no campaign filter will be applied")
+            final_campaign_ids = None
+    elif campaign_id is not None:
+        # Backward compatibility: convert single campaign_id to array
+        final_campaign_ids = [campaign_id]
+        logger.info(f"✅ Using single campaign_id as array (backward compat): {final_campaign_ids}")
+    elif phase_id is not None:
+        # Get all campaign_ids from phase_id (for "All campaigns" case - when nothing is selected)
+        try:
+            from models.client import Campaign
+            all_campaigns = db.query(Campaign).filter(Campaign.phase_id == phase_id).all()
+            final_campaign_ids = [c.id for c in all_campaigns]
+            logger.info(f"⚠️ No campaign_ids provided, getting all campaigns from phase_id={phase_id} (All campaigns): {final_campaign_ids}")
+        except Exception as e:
+            logger.error(f"Error getting campaigns from phase_id: {e}")
+            final_campaign_ids = None
+    else:
+        logger.info("No campaign filter - campaign_ids, campaign_id, and phase_id all None/empty")
+        final_campaign_ids = None
+    
+    logger.info(f"Final campaign_ids to use: {final_campaign_ids}")
+    logger.info(f"=== END CAMPAIGN FILTER LOGIC ===")
+    
+    # Apply campaign filter using campaign_ids (always uses IN clause)
+    query = filter_by_campaign_ids(query, campaign_ids=final_campaign_ids)
+    logger.info(f"Query after campaign_ids filter: {query is not None}")
     
     # Validate query is still valid after filtering
     if query is None:

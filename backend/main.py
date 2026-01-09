@@ -11,14 +11,22 @@ from router.chunk import router as chunk_router
 from router.disposition import router as disposition_router
 from router.translation import router as translation_router
 from router.auth import router as auth_router, is_session_valid
+from router.inbound import router as inbound_router
+from router.table_config import router as table_config_router
 
 # Import all models at startup to ensure SQLAlchemy can resolve relationships
 # This must happen before any queries are executed
-import models  # noqa: F401 - Ensures all models are registered with SQLAlchemy
+from content_size_limit_asgi import ContentSizeLimitMiddleware
+
+MAX_CONTENT_SIZE = 1024 * 1024 * 50 # 50MB limit
 
 app = FastAPI()
 security = HTTPBearer(auto_error=False)
 
+app.add_middleware(
+    ContentSizeLimitMiddleware,
+    max_content_size=MAX_CONTENT_SIZE
+)
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -27,7 +35,10 @@ async def auth_middleware(request: Request, call_next):
     """
     # Allow auth endpoints, root endpoint, and public shared disposition trees
     # Public endpoints: GET /disposition-tree/{share_id} for viewing shared trees (read-only)
+    # Allow inbound router endpoints without authentication
     if (request.url.path.startswith("/auth") or 
+        request.url.path.startswith("/incomming-calls") or 
+        request.url.path.startswith("/table-config") or 
         request.url.path == "/" or 
         request.url.path == "/docs" or 
         request.url.path == "/openapi.json" or 
@@ -104,6 +115,8 @@ app.include_router(campaign_router)
 app.include_router(chunk_router)
 app.include_router(disposition_router)
 app.include_router(translation_router)
+app.include_router(inbound_router)
+app.include_router(table_config_router, prefix="/table-config", tags=["table-config"])
 
 @app.get("/")
 def read_root():

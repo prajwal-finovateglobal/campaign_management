@@ -37,6 +37,8 @@ interface Campaign {
   record_count: number | null;
   status: string | null;
   chunk_size: number | null;  // Chunk size for multiple type campaigns
+  idx?: number | null;  // Starting index in data.csv for partial upsert
+  size?: number | null;  // Number of records to upsert from idx
 }
 
 interface Phone {
@@ -91,7 +93,17 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     status: string;
     record_count: number;
     phase_id: number;
+    idx?: number;
+    size?: number;
   } | null>(null);
+  
+  // Create Campaign Modal states (for single mode)
+  const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false);
+  const [isFullUpsert, setIsFullUpsert] = useState(true);
+  const [campaignIdx, setCampaignIdx] = useState<number>(0);
+  const [campaignSize, setCampaignSize] = useState<number>(0);
+  const [csvRowCount, setCsvRowCount] = useState<number>(0);
+  const [rangeError, setRangeError] = useState<string | null>(null);
   const [settingCampaignId, setSettingCampaignId] = useState(false);
   const [campaignIdMessage, setCampaignIdMessage] = useState<string | null>(null);
   const [csvCampaignIds, setCsvCampaignIds] = useState<number[]>([]);
@@ -122,6 +134,14 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [upsertPreviewRecords, setUpsertPreviewRecords] = useState<any[]>([]);
   const [loadingUpsertPreview, setLoadingUpsertPreview] = useState(false);
   const [upserting, setUpserting] = useState(false);
+  
+  // Update Range states for existing campaigns
+  const [updatingRangeCampaignId, setUpdatingRangeCampaignId] = useState<number | null>(null);
+  const [updateRangeIsFull, setUpdateRangeIsFull] = useState(true);
+  const [updateRangeIdx, setUpdateRangeIdx] = useState<number>(0);
+  const [updateRangeSize, setUpdateRangeSize] = useState<number>(0);
+  const [updateRangeError, setUpdateRangeError] = useState<string | null>(null);
+  const [updatingRange, setUpdatingRange] = useState(false);
   
   // Chunked campaigns upsert modal states
   const [chunkedUpsertModal, setChunkedUpsertModal] = useState<{
@@ -162,6 +182,13 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [uploadingRecords, setUploadingRecords] = useState(false);
   const [formattingPhoneNumbers, setFormattingPhoneNumbers] = useState(false);
   const [phoneFormatMessage, setPhoneFormatMessage] = useState<string | null>(null);
+  
+  // Inbound call upsert states
+  const [showInboundCallModal, setShowInboundCallModal] = useState(false);
+  const [inboundContactTo, setInboundContactTo] = useState<string>('');
+  const [inboundMetadata, setInboundMetadata] = useState<string>('{}');
+  const [upsertingInboundCall, setUpsertingInboundCall] = useState(false);
+  const [inboundCallMessage, setInboundCallMessage] = useState<string | null>(null);
   
   // Phone and caller management states
   const [showPhoneModal, setShowPhoneModal] = useState(false);
@@ -234,7 +261,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
 
           if (response.ok) {
             const result = await response.json();
-            setPhases(result.phases || []);
+            const phasesList = result.phases || [];
+            // Sort phases by name (natural/numeric sorting)
+            phasesList.sort((a: Phase, b: Phase) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+            setPhases(phasesList);
             // Set first phase as default if available
             if (result.phases && result.phases.length > 0) {
               setSelectedPhaseId(result.phases[0].id);
@@ -353,7 +383,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
 
       if (phasesResponse.ok) {
         const phasesResult = await phasesResponse.json();
-        setPhases(phasesResult.phases || []);
+        const phasesList = phasesResult.phases || [];
+        // Sort phases by name (natural/numeric sorting)
+        phasesList.sort((a: Phase, b: Phase) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        setPhases(phasesList);
         // Set the newly created phase as selected
         setSelectedPhaseId(result.id);
         // Switch to existing mode to show the created phase
@@ -413,10 +446,13 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
 
           if (response.ok) {
             const result = await response.json();
-            setCampaigns(result.campaigns || []);
+            const campaignsList = result.campaigns || [];
+            // Sort campaigns by name (natural/numeric sorting)
+            campaignsList.sort((a: Campaign, b: Campaign) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
+            setCampaigns(campaignsList);
             // Set first campaign as default if available
-            if (result.campaigns && result.campaigns.length > 0) {
-              setSelectedCampaignId(result.campaigns[0].id);
+            if (campaignsList.length > 0) {
+              setSelectedCampaignId(campaignsList[0].id);
             } else {
               setSelectedCampaignId(null);
             }
@@ -459,9 +495,12 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
 
       if (response.ok) {
         const result = await response.json();
-        setCampaigns(result.campaigns || []);
-        if (result.campaigns && result.campaigns.length > 0) {
-          setSelectedCampaignId(result.campaigns[0].id);
+        const campaignsList = result.campaigns || [];
+        // Sort campaigns by name (natural/numeric sorting)
+        campaignsList.sort((a: Campaign, b: Campaign) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
+        setCampaigns(campaignsList);
+        if (campaignsList.length > 0) {
+          setSelectedCampaignId(campaignsList[0].id);
         } else {
           setSelectedCampaignId(null);
         }
@@ -1170,7 +1209,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
         if (statusResponse.ok) {
           const statusResult = await statusResponse.json();
           // Update campaigns with refreshed statuses
-          setCampaigns(statusResult.campaigns || []);
+          const campaignsList = statusResult.campaigns || [];
+          // Sort campaigns by name (natural/numeric sorting)
+          campaignsList.sort((a: Campaign, b: Campaign) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
+          setCampaigns(campaignsList);
         }
       }
       
@@ -1528,7 +1570,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                     } else {
                                       const result = await response.json();
                                       // Update campaigns with refreshed statuses
-                                      setCampaigns(result.campaigns || []);
+                                      const campaignsList = result.campaigns || [];
+                                      // Sort campaigns by name (natural/numeric sorting)
+                                      campaignsList.sort((a: Campaign, b: Campaign) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
+                                      setCampaigns(campaignsList);
                                     }
                                   } catch (error: any) {
                                     console.error('Error refreshing all statuses:', error);
@@ -1566,9 +1611,10 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                         </tr>
                       </thead>
                       <tbody>
-                        {campaigns.map((campaign) => {
+                        {[...campaigns].sort((a, b) => a.id - b.id).map((campaign) => {
                           const isIdSet = csvCampaignIds.includes(campaign.id);
                           return (
+                            <>
                           <tr
                             key={campaign.id}
                             className={`${isIdSet ? 'bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/40' : ''} hover:bg-[var(--table-row-hover)] ${
@@ -1642,13 +1688,15 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                       } else {
                                         const result = await response.json();
                                         // Update the campaign in the campaigns array
-                                        setCampaigns(prevCampaigns => 
-                                          prevCampaigns.map(c => 
+                                        setCampaigns(prevCampaigns => {
+                                          const updated = prevCampaigns.map(c => 
                                             c.id === campaign.id 
                                               ? { ...c, status: result.status, record_count: result.record_count }
                                               : c
-                                          )
-                                        );
+                                          );
+                                          // Maintain sort order by name (natural/numeric sorting)
+                                          return updated.sort((a, b) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
+                                        });
                                       }
                                     } catch (error: any) {
                                       console.error('Error refreshing status:', error);
@@ -1791,7 +1839,11 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                           });
                                           
                                           try {
-                                            const response = await api.get(`/get_csv_preview?limit=5&campaign_id=${campaign.id}`);
+                                            // Get campaign's idx and size for range preview
+                                            const idx = campaign.idx ?? 0;
+                                            const size = campaign.size ?? 0;
+                                            
+                                            const response = await api.get(`/get_csv_preview?limit=5&campaign_id=${campaign.id}&idx=${idx}&size=${size}`);
                                             if (response.ok) {
                                               const result = await response.json();
                                               setUpsertPreviewRecords(result.records || []);
@@ -1854,6 +1906,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                   )}
                                 </button>
                               )}
+                              
                                   </>
                                 )}
                                 
@@ -1982,6 +2035,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                             </div>
                             </td>
                           </tr>
+                            </>
                           );
                         })}
                       </tbody>
@@ -2033,55 +2087,25 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               return;
                             }
 
-                            // Get phase name from selected phase
-                            const selectedPhase = phases.find(p => p.id === selectedPhaseId);
-                            if (!selectedPhase) {
-                              setCampaignIdMessage('Error: Phase not found');
-                              setTimeout(() => setCampaignIdMessage(null), 5000);
-                              return;
-                            }
-
-                            setCreatingCampaign(true);
-                            setCampaignIdMessage(null);
-                            
+                            // Fetch CSV row count
                             try {
-                              const response = await api.post('/campaign/create', {
-                                phase_id: selectedPhaseId,
-                                phase_name: selectedPhase.name,
-                              });
-
-                              if (!response.ok) {
-                                const errorData = await response.json();
-                                const errorDetail = errorData.detail || errorData;
-                                let errorMessage = 'Failed to create campaign';
-                                
-                                if (errorDetail.message) {
-                                  errorMessage = errorDetail.message;
-                                } else if (typeof errorDetail === 'string') {
-                                  errorMessage = errorDetail;
-                                }
-                                
-                                setCampaignIdMessage(`Error: ${errorMessage}`);
-                                setTimeout(() => setCampaignIdMessage(null), 5000);
-                                return;
+                              const csvResponse = await api.get('/get_csv_data');
+                              if (csvResponse.ok) {
+                                const csvData = await csvResponse.json();
+                                const rowCount = csvData.data?.length || 0;
+                                setCsvRowCount(rowCount);
+                                setCampaignSize(rowCount); // Set default size to total
                               }
-
-                              const result = await response.json();
-                              setCreatedCampaign({
-                                id: result.id,
-                                campaign_name: result.campaign_name,
-                                cid: result.cid,
-                                status: result.status,
-                                record_count: result.record_count,
-                                phase_id: result.phase_id
-                              });
-                            } catch (error: any) {
-                              console.error('Error creating campaign:', error);
-                              setCampaignIdMessage(`Error: ${error.message || 'Failed to create campaign'}`);
-                              setTimeout(() => setCampaignIdMessage(null), 5000);
-                            } finally {
-                              setCreatingCampaign(false);
+                            } catch (error) {
+                              console.error('Error fetching CSV row count:', error);
+                              setCsvRowCount(0);
                             }
+
+                            // Reset modal state
+                            setIsFullUpsert(true);
+                            setCampaignIdx(0);
+                            setRangeError(null);
+                            setShowCreateCampaignModal(true);
                           }}
                           disabled={creatingCampaign || !selectedPhaseId}
                           className="px-6 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -3067,9 +3091,11 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                       alert(errorDetail.message || 'Failed to delete campaign');
                     } else {
                       // Remove campaign from the list
-                      setCampaigns(prevCampaigns => 
-                        prevCampaigns.filter(c => c.id !== deleteConfirmModal.campaignId)
-                      );
+                      setCampaigns(prevCampaigns => {
+                        const filtered = prevCampaigns.filter(c => c.id !== deleteConfirmModal.campaignId);
+                        // Maintain sort order by name (natural/numeric sorting)
+                        return filtered.sort((a, b) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
+                      });
                       // Close modal
                       setDeleteConfirmModal({ show: false, campaignId: null, campaignName: null });
                       // Refresh campaign IDs
@@ -3105,22 +3131,353 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
           <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Upsert Records</h3>
-              <button
-                onClick={() => {
-                  setUpsertConfirmModal({ show: false, campaignId: null, campaignName: null });
-                  setUpsertPreviewRecords([]);
-                }}
-                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
-                disabled={upserting}
-              >
-                <X className="w-5 h-5 text-[var(--secondary)]" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Update Range button - only show for single type campaigns */}
+                {(() => {
+                  const campaign = campaigns.find(c => c.id === upsertConfirmModal.campaignId);
+                  if (campaign && campaign.type === 'single' && campaign.status === 'idle') {
+                    return (
+                      <button
+                        onClick={async () => {
+                          // Fetch CSV row count
+                          let totalRows = 0;
+                          try {
+                            const csvResponse = await api.get('/get_csv_data');
+                            if (csvResponse.ok) {
+                              const csvData = await csvResponse.json();
+                              totalRows = csvData.data?.length || 0;
+                            }
+                          } catch (error) {
+                            console.error('Error fetching CSV row count:', error);
+                          }
+
+                          // Set current campaign values or defaults
+                          const currentIdx = campaign.idx ?? 0;
+                          const currentSize = campaign.size ?? totalRows;
+                          const isCurrentlyFull = (currentIdx === 0 && currentSize === totalRows) || (campaign.idx === null && campaign.size === null);
+                          
+                          setUpdateRangeIsFull(isCurrentlyFull);
+                          setUpdateRangeIdx(currentIdx);
+                          setUpdateRangeSize(currentSize);
+                          setUpdateRangeError(null);
+                          setUpdatingRangeCampaignId(campaign.id);
+                        }}
+                        className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                        disabled={upserting || updatingRange}
+                      >
+                        Update Range
+                      </button>
+                    );
+                  }
+                  return null;
+                })()}
+                <button
+                  onClick={() => {
+                    setUpsertConfirmModal({ show: false, campaignId: null, campaignName: null });
+                    setUpsertPreviewRecords([]);
+                    setUpdatingRangeCampaignId(null);
+                    setUpdateRangeError(null);
+                  }}
+                  className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
+                  disabled={upserting || updatingRange}
+                >
+                  <X className="w-5 h-5 text-[var(--secondary)]" />
+                </button>
+              </div>
             </div>
             
             <div className="mb-6">
               <p className="text-sm text-[var(--foreground)] mb-4">
                 You are about to upsert records from <strong>data.csv</strong> to campaign: <strong>{upsertConfirmModal.campaignName}</strong>
               </p>
+              
+              {/* Range Information */}
+              {(() => {
+                const campaign = campaigns.find(c => c.id === upsertConfirmModal.campaignId);
+                if (!campaign) return null;
+                
+                const idx = campaign.idx ?? 0;
+                const size = campaign.size ?? 0;
+                
+                // Check if it's full: 
+                // 1. idx is null and size is null (default full)
+                // 2. idx is 0 and size equals csvRowCount (explicit full)
+                // 3. size is 0 or null (treat as full range)
+                const isFull = (campaign.idx === null && campaign.size === null) ||
+                              (idx === 0 && size === csvRowCount) ||
+                              (idx === 0 && campaign.size === null) ||
+                              size === 0;
+                
+                // For full upsert, just show "Full upsert" without range details
+                // For partial, calculate and show the range
+                let displayText = '';
+                if (isFull) {
+                  displayText = 'Full upsert';
+                } else {
+                  const endingIdx = idx + size - 1;
+                  displayText = `Partial upsert: Records ${idx} to ${endingIdx} (${size} records)`;
+                }
+                
+                return (
+                  <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 rounded-md text-sm">
+                    <p className="font-semibold mb-1 flex items-center gap-2">
+                      <Info className="w-4 h-4" />
+                      Upsert Range:
+                    </p>
+                    <p>{displayText}</p>
+                  </div>
+                );
+              })()}
+              
+              {/* Update Range Section - shown when updatingRangeCampaignId matches modal campaign */}
+              {updatingRangeCampaignId === upsertConfirmModal.campaignId && (
+                <div className="mb-6 p-4 bg-[var(--input-bg)] rounded-md border border-[var(--input-border)]">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-[var(--foreground)]">Update Range</h4>
+                    <button
+                      onClick={() => {
+                        setUpdatingRangeCampaignId(null);
+                        setUpdateRangeError(null);
+                      }}
+                      className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
+                      disabled={updatingRange}
+                    >
+                      <X className="w-4 h-4 text-[var(--secondary)]" />
+                    </button>
+                  </div>
+
+                  {/* Full/Partial Toggle */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                      Upsert Mode
+                    </label>
+                    <div className="flex items-center gap-2 bg-[var(--card-bg)] p-1 rounded-lg border border-[var(--input-border)]">
+                      <button
+                        onClick={() => {
+                          setUpdateRangeIsFull(true);
+                          setUpdateRangeError(null);
+                        }}
+                        disabled={updatingRange}
+                        className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                          updateRangeIsFull
+                            ? 'bg-[var(--primary)] text-white shadow-sm'
+                            : 'text-[var(--secondary)] hover:text-[var(--foreground)]'
+                        } disabled:opacity-50`}
+                      >
+                        Full
+                      </button>
+                      <button
+                        onClick={() => {
+                          setUpdateRangeIsFull(false);
+                          setUpdateRangeError(null);
+                        }}
+                        disabled={updatingRange}
+                        className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                          !updateRangeIsFull
+                            ? 'bg-[var(--primary)] text-white shadow-sm'
+                            : 'text-[var(--secondary)] hover:text-[var(--foreground)]'
+                        } disabled:opacity-50`}
+                      >
+                        Partial
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Partial Mode Fields */}
+                  {!updateRangeIsFull && (
+                    <div className="space-y-3 p-4 bg-[var(--card-bg)] rounded-md border border-[var(--input-border)]">
+                      <div>
+                        <label className="block text-sm font-medium text-[var(--foreground)] mb-1">
+                          Index (Starting Position)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={updateRangeIdx}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setUpdateRangeIdx(val);
+                            setUpdateRangeError(null);
+                          }}
+                          disabled={updatingRange}
+                          className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--card-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-[var(--foreground)] mb-1">
+                          Size (Number of Records)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={updateRangeSize}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setUpdateRangeSize(val);
+                            setUpdateRangeError(null);
+                          }}
+                          disabled={updatingRange}
+                          className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--card-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50"
+                        />
+                      </div>
+
+                      {updateRangeError && (
+                        <div className="p-3 rounded-md bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+                          <AlertTriangle className="w-4 h-4 inline mr-1" />
+                          {updateRangeError}
+                        </div>
+                      )}
+
+                      {!updateRangeError && updateRangeIdx >= 0 && updateRangeSize > 0 && (
+                        <div className="p-3 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 text-sm">
+                          <Info className="w-4 h-4 inline mr-1" />
+                          {(() => {
+                            // Calculate if size needs adjustment
+                            const csvTotal = csvRowCount || 0;
+                            const needsAdjustment = updateRangeIdx + updateRangeSize > csvTotal;
+                            const adjustedSize = needsAdjustment ? csvTotal - updateRangeIdx : updateRangeSize;
+                            const endIdx = updateRangeIdx + adjustedSize - 1;
+                            
+                            return needsAdjustment ? (
+                              <>
+                                Size will be auto-adjusted to fit CSV bounds. Will upsert records {updateRangeIdx} to {endIdx} ({adjustedSize} records)
+                              </>
+                            ) : (
+                              <>
+                                Will upsert records {updateRangeIdx} to {endIdx} ({updateRangeSize} records)
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-3 justify-end mt-4">
+                    <button
+                      onClick={() => {
+                        setUpdatingRangeCampaignId(null);
+                        setUpdateRangeError(null);
+                      }}
+                      disabled={updatingRange}
+                      className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const campaign = campaigns.find(c => c.id === upsertConfirmModal.campaignId);
+                        if (!campaign) return;
+
+                        // Fetch CSV row count for validation
+                        let totalRows = 0;
+                        try {
+                          const csvResponse = await api.get('/get_csv_data');
+                          if (csvResponse.ok) {
+                            const csvData = await csvResponse.json();
+                            totalRows = csvData.data?.length || 0;
+                          }
+                        } catch (error) {
+                          console.error('Error fetching CSV row count:', error);
+                        }
+
+                        // Validate partial mode
+                        if (!updateRangeIsFull) {
+                          if (updateRangeIdx < 0) {
+                            setUpdateRangeError(`Index must be >= 0`);
+                            return;
+                          }
+                          if (updateRangeSize <= 0) {
+                            setUpdateRangeError(`Size must be > 0`);
+                            return;
+                          }
+                          if (updateRangeIdx >= totalRows) {
+                            setUpdateRangeError(`Index (${updateRangeIdx}) must be less than total CSV rows (${totalRows}). Valid range: 0 to ${totalRows - 1}`);
+                            return;
+                          }
+                          // Auto-adjust size if it exceeds CSV bounds (like Python list slicing)
+                          // Note: Backend will also auto-adjust, but we do it here to update UI
+                          if (updateRangeIdx + updateRangeSize > totalRows) {
+                            const adjustedSize = totalRows - updateRangeIdx;
+                            setUpdateRangeSize(adjustedSize);
+                            setUpdateRangeError(null);
+                          }
+                        }
+
+                        setUpdatingRange(true);
+                        setUpdateRangeError(null);
+                        
+                        try {
+                          // Calculate final size (auto-adjust if needed, like Python list slicing)
+                          let finalSize = updateRangeSize;
+                          if (!updateRangeIsFull && updateRangeIdx + updateRangeSize > totalRows) {
+                            finalSize = totalRows - updateRangeIdx;
+                            setUpdateRangeSize(finalSize); // Update UI
+                          }
+                          
+                          const response = await api.post('/campaign/update-range', {
+                            campaign_id: campaign.id,
+                            is_full: updateRangeIsFull,
+                            idx: updateRangeIsFull ? undefined : updateRangeIdx,
+                            size: updateRangeIsFull ? undefined : finalSize,
+                          });
+
+                          if (!response.ok) {
+                            const errorData = await response.json();
+                            const errorDetail = errorData.detail || errorData;
+                            const errorMessage = errorDetail.message || 'Failed to update range';
+                            setUpdateRangeError(errorMessage);
+                            return;
+                          }
+
+                          const result = await response.json();
+                          alert(result.message || 'Range updated successfully');
+                          
+                          // Refresh campaigns to get updated idx/size
+                          await handleRefresh();
+                          
+                          // Refresh the preview to show updated range
+                          if (upsertConfirmModal.campaignId) {
+                            setLoadingUpsertPreview(true);
+                            try {
+                              const previewResponse = await api.get(`/get_csv_preview?limit=5&campaign_id=${upsertConfirmModal.campaignId}`);
+                              if (previewResponse.ok) {
+                                const previewData = await previewResponse.json();
+                                setUpsertPreviewRecords(previewData.records || []);
+                              }
+                            } catch (error) {
+                              console.error('Error refreshing preview:', error);
+                            } finally {
+                              setLoadingUpsertPreview(false);
+                            }
+                          }
+                          
+                          setUpdatingRangeCampaignId(null);
+                          setUpdateRangeError(null);
+                        } catch (error: any) {
+                          console.error('Error updating range:', error);
+                          setUpdateRangeError(`Error: ${error.message || 'Failed to update range'}`);
+                        } finally {
+                          setUpdatingRange(false);
+                        }
+                      }}
+                      disabled={updatingRange || (!updateRangeIsFull && (updateRangeIdx < 0 || updateRangeSize <= 0))}
+                      className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {updatingRange ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        'Save Range'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
               
               {loadingUpsertPreview ? (
                 <div className="flex items-center justify-center py-8">
@@ -4685,6 +5042,273 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
               >
                 Got it
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Campaign Modal (Single Mode) */}
+      {showCreateCampaignModal && selectedPhaseId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[var(--foreground)]">
+                Create Campaign
+              </h3>
+              <button
+                onClick={() => {
+                  setShowCreateCampaignModal(false);
+                  setRangeError(null);
+                }}
+                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
+                disabled={creatingCampaign}
+              >
+                <X className="w-5 h-5 text-[var(--secondary)]" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Full/Partial Toggle */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                  Upsert Mode
+                </label>
+                <div className="flex items-center gap-2 bg-[var(--input-bg)] p-1 rounded-lg border border-[var(--input-border)]">
+                  <button
+                    onClick={() => {
+                      setIsFullUpsert(true);
+                      setRangeError(null);
+                    }}
+                    disabled={creatingCampaign}
+                    className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                      isFullUpsert
+                        ? 'bg-[var(--primary)] text-white shadow-sm'
+                        : 'text-[var(--secondary)] hover:text-[var(--foreground)]'
+                    } disabled:opacity-50`}
+                  >
+                    Full
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsFullUpsert(false);
+                      setRangeError(null);
+                    }}
+                    disabled={creatingCampaign}
+                    className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                      !isFullUpsert
+                        ? 'bg-[var(--primary)] text-white shadow-sm'
+                        : 'text-[var(--secondary)] hover:text-[var(--foreground)]'
+                    } disabled:opacity-50`}
+                  >
+                    Partial
+                  </button>
+                </div>
+                <p className="text-xs text-[var(--secondary)] mt-1">
+                  {isFullUpsert 
+                    ? `Will upsert all ${csvRowCount} records from data.csv (idx: 0, size: ${csvRowCount})`
+                    : 'Specify a range of records to upsert from data.csv'
+                  }
+                </p>
+              </div>
+
+              {/* Partial Mode Fields */}
+              {!isFullUpsert && (
+                <div className="space-y-3 p-4 bg-[var(--input-bg)] rounded-md border border-[var(--input-border)]">
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--foreground)] mb-1">
+                      Index (Starting Position)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={csvRowCount - 1}
+                      value={campaignIdx}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setCampaignIdx(val);
+                        setRangeError(null);
+                      }}
+                      disabled={creatingCampaign}
+                      className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--card-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50"
+                      placeholder="0"
+                    />
+                    <p className="text-xs text-[var(--secondary)] mt-1">
+                      Starting index in data.csv (0-based). Valid range: 0 to {csvRowCount - 1}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--foreground)] mb-1">
+                      Size (Number of Records)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max={csvRowCount - campaignIdx}
+                      value={campaignSize}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setCampaignSize(val);
+                        setRangeError(null);
+                      }}
+                      disabled={creatingCampaign}
+                      className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--card-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50"
+                      placeholder="100"
+                    />
+                    <p className="text-xs text-[var(--secondary)] mt-1">
+                      Number of records to upsert. Max: {csvRowCount - campaignIdx} (from index {campaignIdx})
+                    </p>
+                  </div>
+
+                  {rangeError && (
+                    <div className="p-3 rounded-md bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+                      <AlertTriangle className="w-4 h-4 inline mr-1" />
+                      {rangeError}
+                    </div>
+                  )}
+
+                  {!rangeError && campaignIdx >= 0 && campaignSize > 0 && (
+                    <div className="p-3 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 text-sm">
+                      <Info className="w-4 h-4 inline mr-1" />
+                      {campaignIdx + campaignSize > csvRowCount ? (
+                        <>
+                          Size will be auto-adjusted to fit CSV bounds. Will upsert records {campaignIdx} to {Math.min(campaignIdx + campaignSize - 1, csvRowCount - 1)} ({Math.min(campaignSize, csvRowCount - campaignIdx)} records)
+                        </>
+                      ) : (
+                        <>
+                          Will upsert records {campaignIdx} to {campaignIdx + campaignSize - 1} ({campaignSize} records)
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Error Message */}
+              {campaignIdMessage && campaignIdMessage.startsWith('Error') && (
+                <div className="p-3 rounded-md bg-[var(--danger)] text-white text-sm">
+                  {campaignIdMessage}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--card-border)]">
+                <button
+                  onClick={() => {
+                    setShowCreateCampaignModal(false);
+                    setRangeError(null);
+                    setCampaignIdMessage(null);
+                  }}
+                  disabled={creatingCampaign}
+                  className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!selectedPhaseId) return;
+
+                                        // Validate partial mode
+                                        if (!isFullUpsert) {
+                                          if (campaignIdx < 0) {
+                                            setRangeError(`Index must be >= 0`);
+                                            return;
+                                          }
+                                          if (campaignSize <= 0) {
+                                            setRangeError(`Size must be > 0`);
+                                            return;
+                                          }
+                                          if (campaignIdx >= csvRowCount) {
+                                            setRangeError(`Index (${campaignIdx}) must be less than total CSV rows (${csvRowCount}). Valid range: 0 to ${csvRowCount - 1}`);
+                                            return;
+                                          }
+                                          // Auto-adjust size if it exceeds CSV bounds (like Python list slicing)
+                                          // Note: Backend will also auto-adjust, but we do it here to update UI
+                                          if (campaignIdx + campaignSize > csvRowCount) {
+                                            const adjustedSize = csvRowCount - campaignIdx;
+                                            setCampaignSize(adjustedSize);
+                                          }
+                                        }
+
+                    // Get phase name from selected phase
+                    const selectedPhase = phases.find(p => p.id === selectedPhaseId);
+                    if (!selectedPhase) {
+                      setCampaignIdMessage('Error: Phase not found');
+                      setTimeout(() => setCampaignIdMessage(null), 5000);
+                      return;
+                    }
+
+                    setCreatingCampaign(true);
+                    setCampaignIdMessage(null);
+                    setRangeError(null);
+                    
+                    try {
+                      // Calculate final size (auto-adjust if needed, like Python list slicing)
+                      let finalSize = campaignSize;
+                      if (!isFullUpsert && campaignIdx + campaignSize > csvRowCount) {
+                        finalSize = csvRowCount - campaignIdx;
+                        setCampaignSize(finalSize); // Update UI
+                      }
+                      
+                      const response = await api.post('/campaign/create', {
+                        phase_id: selectedPhaseId,
+                        phase_name: selectedPhase.name,
+                        campaign_type: 'single',
+                        is_full: isFullUpsert,
+                        idx: isFullUpsert ? undefined : campaignIdx,
+                        size: isFullUpsert ? undefined : finalSize,
+                      });
+
+                      if (!response.ok) {
+                        const errorData = await response.json();
+                        const errorDetail = errorData.detail || errorData;
+                        let errorMessage = 'Failed to create campaign';
+                        
+                        if (errorDetail.message) {
+                          errorMessage = errorDetail.message;
+                        } else if (typeof errorDetail === 'string') {
+                          errorMessage = errorDetail;
+                        }
+                        
+                        setCampaignIdMessage(`Error: ${errorMessage}`);
+                        setTimeout(() => setCampaignIdMessage(null), 5000);
+                        return;
+                      }
+
+                      const result = await response.json();
+                      setCreatedCampaign({
+                        id: result.id,
+                        campaign_name: result.campaign_name,
+                        cid: result.cid,
+                        status: result.status,
+                        record_count: result.record_count,
+                        phase_id: result.phase_id,
+                        idx: result.idx,
+                        size: result.size
+                      });
+                      setShowCreateCampaignModal(false);
+                      setRangeError(null);
+                    } catch (error: any) {
+                      console.error('Error creating campaign:', error);
+                      setCampaignIdMessage(`Error: ${error.message || 'Failed to create campaign'}`);
+                      setTimeout(() => setCampaignIdMessage(null), 5000);
+                    } finally {
+                      setCreatingCampaign(false);
+                    }
+                  }}
+                  disabled={creatingCampaign || (!isFullUpsert && (campaignIdx < 0 || campaignSize <= 0))}
+                  className="px-6 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {creatingCampaign ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Campaign'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

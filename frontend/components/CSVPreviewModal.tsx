@@ -7,6 +7,7 @@ interface CSVPreviewModalProps {
   data: any[];
   selectedColumns: Record<string, boolean>;
   csvFileName: string;
+  downloadFormat?: 'csv' | 'json';
   onClose: () => void;
   onConfirmDownload: () => void;
 }
@@ -94,6 +95,7 @@ export function CSVPreviewModal({
   data,
   selectedColumns,
   csvFileName,
+  downloadFormat = 'csv',
   onClose,
   onConfirmDownload,
 }: CSVPreviewModalProps) {
@@ -120,7 +122,7 @@ export function CSVPreviewModal({
         <div className="flex items-center justify-between p-4 border-b border-[var(--card-border)]">
           <h2 className="text-lg font-semibold text-[var(--foreground)] flex items-center gap-2">
             <Download className="w-5 h-5" />
-            CSV Download Preview
+            {downloadFormat.toUpperCase()} Download Preview
           </h2>
           <button
             onClick={onClose}
@@ -135,7 +137,7 @@ export function CSVPreviewModal({
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex flex-col gap-1">
               <p className="text-sm text-[var(--foreground)]">
-                <span className="font-semibold">File name:</span> {csvFileName || 'campaign_data'}.csv
+                <span className="font-semibold">File name:</span> {csvFileName || 'campaign_data'}.{downloadFormat}
               </p>
               <p className="text-sm text-[var(--secondary)]">
                 <span className="font-semibold">Total rows:</span> {data.length} | 
@@ -155,7 +157,7 @@ export function CSVPreviewModal({
                 className="px-4 py-2 text-sm font-medium text-white bg-[var(--success)] rounded-md hover:opacity-90 transition-opacity flex items-center gap-2"
               >
                 <Download className="w-4 h-4" />
-                Download CSV
+                Download {downloadFormat.toUpperCase()}
               </button>
             </div>
           </div>

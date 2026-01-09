@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Query
 from models.tables import DataLog
 from models.client import Campaign
-from typing import Optional, Type
+from typing import Optional, Type, List
 from datetime import datetime
 import loguru
 import pytz
@@ -80,32 +80,72 @@ def _get_model_from_query(query: Query) -> Type:
     logger.warning("Could not extract model from query, falling back to DataLog")
     return DataLog
 
-def filter_by_campaign_id(query: Query, campaign_id: Optional[int]) -> Query:
+def filter_by_campaign_ids(query: Query, campaign_ids: Optional[List[int]] = None) -> Query:
     """
-    Filter query by campaign_id.
+    Filter query by campaign_ids using IN clause.
     Works with both static DataLog and dynamic models.
+    
+    This function always uses WHERE campaign_id IN (...) for consistency.
+    - Single campaign: [35] -> WHERE campaign_id IN (35)
+    - Multiple campaigns: [35, 45, 136] -> WHERE campaign_id IN (35, 45, 136)
+    - All campaigns from phase: [all_ids] -> WHERE campaign_id IN (all_ids)
     
     Args:
         query: SQLAlchemy Query object (not executed).
-        campaign_id: Campaign ID to filter by.
+        campaign_ids: List of Campaign IDs to filter by.
     
     Returns:
         Modified Query object (not executed).
     
     Example:
         query = get_base_query(db)
-        query = filter_by_campaign_id(query, campaign_id=1)
+        query = filter_by_campaign_ids(query, campaign_ids=[1, 2, 3])
         results = query.all()
     """
+    logger.info(f"=== filter_by_campaign_ids CALLED ===")
+    logger.info(f"Input campaign_ids: {campaign_ids} (type: {type(campaign_ids)})")
+    logger.info(f"Query is None: {query is None}")
+    
     if query is None:
-        logger.warning("Cannot filter by campaign_id: query is None")
+        logger.warning("Cannot filter by campaign_ids: query is None")
         return query
     
-    if campaign_id is not None:
-        logger.info(f"Filtering by campaign_id: {campaign_id}")
+    if campaign_ids is None or len(campaign_ids) == 0:
+        logger.info("No campaign_ids provided, skipping campaign filter")
+        return query
+    
+    # Extract model first before logging
+    try:
         model = _get_model_from_query(query)
-        return query.filter(model.campaign_id == campaign_id)
-    return query
+        if model is None:
+            logger.error("Could not extract model from query, skipping campaign filter")
+            return query
+        logger.info(f"Model extracted: {model}")
+        logger.info(f"Model has campaign_id attribute: {hasattr(model, 'campaign_id')}")
+    except Exception as e:
+        logger.error(f"Error extracting model from query: {e}", exc_info=True)
+        return query
+    
+    # Ensure all IDs are integers
+    campaign_ids_int = [int(id) for id in campaign_ids if id is not None]
+    logger.info(f"campaign_ids after int conversion: {campaign_ids_int}")
+    
+    if len(campaign_ids_int) == 0:
+        logger.warning("campaign_ids list is empty after filtering, skipping campaign filter")
+        return query
+    
+    logger.info(f"✅ Applying filter: model.campaign_id.in_({campaign_ids_int})")
+    filtered_query = query.filter(model.campaign_id.in_(campaign_ids_int))
+    
+    # Try to get the SQL to verify
+    try:
+        compiled = str(filtered_query.statement.compile(compile_kwargs={"literal_binds": False}))
+        logger.info(f"SQL after campaign_ids filter: {compiled[:500]}...")  # First 500 chars
+    except Exception as e:
+        logger.warning(f"Could not compile SQL: {e}")
+    
+    logger.info(f"=== END filter_by_campaign_ids ===")
+    return filtered_query
 
 def filter_by_client_id(query: Query, client_id: Optional[int]) -> Query:
     """

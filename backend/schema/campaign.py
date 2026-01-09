@@ -6,6 +6,9 @@ class CreateCampaignRequest(BaseModel):
     phase_id: int
     phase_name: str
     campaign_type: str = 'single'  # 'single' or 'multiple'
+    is_full: bool = True  # True for full upsert (idx=0, size=total), False for partial
+    idx: Optional[int] = None  # Starting index in data.csv (0-based), required if is_full=False
+    size: Optional[int] = None  # Number of records to upsert, required if is_full=False
 
 
 class CreateCampaignResponse(BaseModel):
@@ -17,6 +20,8 @@ class CreateCampaignResponse(BaseModel):
     record_count: Optional[int] = None
     phase_id: Optional[int] = None
     type: Optional[str] = None
+    idx: Optional[int] = None
+    size: Optional[int] = None
     message: Optional[str] = None
 
 
@@ -96,4 +101,18 @@ class DeleteRecordRequest(BaseModel):
 class DeleteRecordResponse(BaseModel):
     success: bool
     message: Optional[str] = None
+
+
+class UpdateCampaignRangeRequest(BaseModel):
+    campaign_id: int
+    is_full: bool = True  # True for full upsert (idx=0, size=total), False for partial
+    idx: Optional[int] = None  # Starting index in data.csv (0-based), required if is_full=False
+    size: Optional[int] = None  # Number of records to upsert, required if is_full=False
+
+
+class UpdateCampaignRangeResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
+    idx: Optional[int] = None
+    size: Optional[int] = None
 

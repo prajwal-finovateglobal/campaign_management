@@ -16,3 +16,4 @@ langchain-openai
 langchain-core
 requests
 pytz
+content-size-limit-asgi

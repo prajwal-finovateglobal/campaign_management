@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean, JSON, Text
 from database.session import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy import ForeignKey
-
+from sqlalchemy import text
 # Import DataLog to ensure it's created before Client relationships are set up
 # This must be imported here to avoid circular dependency issues
 # Import at module level to ensure DataLog is registered before Client class definition
@@ -43,7 +43,7 @@ class Campaign(Base):
     campaign_name = Column(String, nullable=True)
     upsert_time = Column(DateTime, nullable=True)
     phase_id = Column(Integer, ForeignKey('cms_phase.id'), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=True, server_default="CURRENT_TIMESTAMP")
+    created_at = Column(DateTime(timezone=True), nullable=True, server_default=text("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')"))
     cid = Column(Text, nullable=True)  # Changed from String to Text per DDL
     status = Column(String, nullable=True)  # Campaign status from Millis.ai
     records_count = Column(Integer, nullable=True)  # Record count from Millis.ai
@@ -51,6 +51,8 @@ class Campaign(Base):
     agent_id = Column(String, nullable=True)  # Agent ID from Millis.ai
     type = Column(String, nullable=True)  # Campaign type
     chunk_size = Column(Integer, nullable=True)  # Chunk size used when creating chunks (for multiple type)
+    idx = Column(Integer, nullable=True, default=0)  # Starting index in data.csv for partial upsert (0-based)
+    size = Column(Integer, nullable=True, default=0)  # Number of records to upsert from idx
 
     # Relationships
     phase = relationship('Phase', back_populates='campaigns')

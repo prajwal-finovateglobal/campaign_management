@@ -111,7 +111,9 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
             'type': campaign_type,  # Campaign type (single/multiple)
             'record_count': record_count,  # Use DB value first, or sum of chunks for multiple type
             'status': status,  # Use DB value first
-            'chunk_size': campaign.chunk_size if campaign.chunk_size else None  # Chunk size for multiple type campaigns
+            'chunk_size': campaign.chunk_size if campaign.chunk_size else None,  # Chunk size for multiple type campaigns
+            'idx': campaign.idx,  # Starting index in data.csv for partial upsert
+            'size': campaign.size  # Number of records to upsert from idx
         }
         campaigns.append(campaign_dict)
         
@@ -175,7 +177,10 @@ def create_campaign_service(
     db: DB_DEPENDENCY,
     phase_id: int,
     phase_name: str,
-    campaign_type: str = 'single'
+    campaign_type: str = 'single',
+    is_full: bool = True,
+    idx: Optional[int] = None,
+    size: Optional[int] = None
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Create a new campaign for a phase.
@@ -209,6 +214,62 @@ def create_campaign_service(
         # Generate campaign name
         campaign_name = generate_campaign_name(phase_name, phase_id, db)
         
+        # Handle idx and size based on is_full flag
+        final_idx = 0
+        final_size = 0
+        
+        if is_full:
+            # Full mode: get total CSV row count and set idx=0, size=total
+            from service.csv_service import get_csv_row_count
+            csv_success, csv_error, total_rows = get_csv_row_count()
+            if not csv_success:
+                error_msg = f"Failed to get CSV row count: {csv_error}"
+                logger.error(error_msg)
+                return False, error_msg, None
+            final_idx = 0
+            final_size = total_rows
+            logger.info(f"Full mode: Setting idx=0, size={total_rows}")
+        else:
+            # Partial mode: validate provided idx and size
+            if idx is None or size is None:
+                error_msg = "idx and size are required when is_full=False"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            if idx < 0:
+                error_msg = f"idx must be >= 0, got {idx}"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            if size <= 0:
+                error_msg = f"size must be > 0, got {size}"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            # Get CSV row count to validate range
+            from service.csv_service import get_csv_row_count
+            csv_success, csv_error, total_rows = get_csv_row_count()
+            if not csv_success:
+                error_msg = f"Failed to get CSV row count: {csv_error}"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            if idx >= total_rows:
+                error_msg = f"idx ({idx}) must be less than total CSV rows ({total_rows}). Valid range: 0 to {total_rows - 1}"
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            # Auto-adjust size if it exceeds CSV bounds (like Python list slicing)
+            if idx + size > total_rows:
+                adjusted_size = total_rows - idx
+                logger.info(f"Size ({size}) exceeds CSV bounds. Auto-adjusting to {adjusted_size} (from index {idx} to end of CSV)")
+                final_size = adjusted_size
+            else:
+                final_size = size
+            
+            final_idx = idx
+            logger.info(f"Partial mode: Setting idx={final_idx}, size={final_size} (records {final_idx} to {final_idx + final_size - 1})")
+        
         if campaign_type == 'multiple':
             # For multiple type, create virtual campaign in DB only (no Millis.ai call)
             logger.info(f"Creating virtual campaign (multiple type) for chunking: {campaign_name}")
@@ -220,6 +281,8 @@ def create_campaign_service(
                 status='pending',  # Virtual campaign status
                 records_count=None,  # Will be sum of chunks
                 type='single',  # Start as single, will be set to multiple when chunks are created
+                idx=final_idx,
+                size=final_size,
                 upsert_time=datetime.now(),
                 created_at=datetime.now()
             )
@@ -237,7 +300,9 @@ def create_campaign_service(
                 'status': new_campaign.status,
                 'record_count': 0,
                 'phase_id': new_campaign.phase_id,
-                'type': 'single'  # Will change to multiple when chunks are created
+                'type': 'single',  # Will change to multiple when chunks are created
+                'idx': new_campaign.idx,
+                'size': new_campaign.size
             }
         
         else:
@@ -272,6 +337,8 @@ def create_campaign_service(
                 status=millis_status,  # Save status from Millis.ai
                 records_count=record_count,  # Save record count from Millis.ai
                 type='single',
+                idx=final_idx,
+                size=final_size,
                 upsert_time=datetime.now(),
                 created_at=created_at_dt if created_at_dt else datetime.now()
             )
@@ -290,6 +357,8 @@ def create_campaign_service(
                 'status': millis_status,
                 'record_count': record_count,
                 'type': 'single',
+                'idx': new_campaign.idx,
+                'size': new_campaign.size,
                 'upsert_time': new_campaign.upsert_time.isoformat() if new_campaign.upsert_time else None,
                 'created_at': new_campaign.created_at.isoformat() if new_campaign.created_at else None
             }
@@ -687,10 +756,35 @@ def upload_csv_records_to_campaign(db: DB_DEPENDENCY, campaign_id: int) -> Tuple
             logger.warning(error_msg)
             return False, error_msg, None
         
+        # Apply idx and size range if specified (for partial upsert)
+        idx = campaign.idx if campaign.idx is not None else 0
+        size = campaign.size if campaign.size is not None else len(csv_data)
+        
+        # Validate idx
+        if idx < 0 or idx >= len(csv_data):
+            error_msg = f"Invalid idx: {idx}. Must be between 0 and {len(csv_data) - 1}"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        # Auto-adjust size if it exceeds CSV bounds (like Python list slicing)
+        if size <= 0:
+            error_msg = f"Invalid size: {size}. Must be > 0"
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        if idx + size > len(csv_data):
+            adjusted_size = len(csv_data) - idx
+            logger.info(f"Size ({size}) exceeds CSV bounds. Auto-adjusting to {adjusted_size} (from index {idx} to end of CSV)")
+            size = adjusted_size
+        
+        # Slice CSV data based on idx and size (Python list slicing behavior)
+        records_to_upsert = csv_data[idx:idx + size]
+        logger.info(f"Upserting records {idx} to {idx + size - 1} ({len(records_to_upsert)} records) from data.csv")
+        
         # Format records for Millis.ai API
         # Extract phone from phone, contact_to, or contact_from column (in order of priority)
         formatted_records = []
-        for record in csv_data:
+        for record in records_to_upsert:
             # Try multiple column names for phone number
             phone = record.get("phone") or record.get("contact_to") or record.get("contact_from") or ""
             if phone:

@@ -11,7 +11,12 @@ logger = loguru.logger
 
 @router.post("/show_data")
 def show_data(request: ShowDataRequest, db: DB_DEPENDENCY)->ShowDataResponse:
-    logger.info(f"Showing data with request: {request}")
+    logger.info(f"=== SHOW_DATA REQUEST RECEIVED ===")
+    logger.info(f"Request object: {request}")
+    logger.info(f"campaign_ids from request: {request.campaign_ids} (type: {type(request.campaign_ids)})")
+    logger.info(f"campaign_id from request: {request.campaign_id}")
+    logger.info(f"phase_id from request: {request.phase_id}")
+    logger.info(f"=== END REQUEST LOG ===")
     result = filter_data(db, request)
     
     print(f"Rows received from filter_data: {len(result)}")

@@ -11,7 +11,7 @@ import { CSVPreviewModal } from '@/components/CSVPreviewModal';
 import { CampaignManagement } from '@/components/CampaignManagement';
 import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
-import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle } from 'lucide-react';
+import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle, FileText, Code } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
 
 interface DataLog {
@@ -45,6 +45,7 @@ export default function Home() {
   const [currentPreset, setCurrentPreset] = useState<string>('simple');
   const [expandedMetadataColumns, setExpandedMetadataColumns] = useState<Record<string, boolean>>({});
   const [csvFileName, setCsvFileName] = useState('campaign_data');
+  const [downloadFormat, setDownloadFormat] = useState<'csv' | 'json'>('csv');
   const [sdtcError, setSdtcError] = useState<string | null>(null);
   const [sdtcErrorTimeout, setSdtcErrorTimeout] = useState<NodeJS.Timeout | null>(null);
   const [deletePCDMessage, setDeletePCDMessage] = useState<string | null>(null);
@@ -158,6 +159,7 @@ export default function Home() {
   const [selectedClientTableName, setSelectedClientTableName] = useState<string | null>(null);
   const [selectedPhaseId, setSelectedPhaseId] = useState<number | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<number[] | null>(null);
 
   const handleApplyFilters = async (filters: any) => {
     // Validate that client is selected before applying filters
@@ -169,13 +171,33 @@ export default function Home() {
     setLoading(true);
     try {
       // Add persistent filter values to the request
-      const requestBody = {
+      const requestBody: any = {
         ...filters,
         client_id: selectedClientId,
         table_name: selectedClientTableName,
         phase_id: selectedPhaseId,
-        campaign_id: selectedCampaignId,
       };
+      
+      // Always use campaign_ids (array) for consistency - works for both single and multiple
+      // Single mode: [35] -> WHERE campaign_id IN (35)
+      // Multiple mode: [35, 45, 136] -> WHERE campaign_id IN (35, 45, 136)
+      // All campaigns: will be handled by backend when campaign_ids is empty/null but phase_id is set
+      console.log('Filter apply - selectedCampaignIds:', selectedCampaignIds);
+      console.log('Filter apply - selectedCampaignId:', selectedCampaignId);
+      
+      if (selectedCampaignIds && selectedCampaignIds.length > 0) {
+        requestBody.campaign_ids = selectedCampaignIds;
+        console.log('Sending campaign_ids to backend:', selectedCampaignIds);
+      } else if (selectedCampaignId) {
+        // Single mode: convert to array [id]
+        requestBody.campaign_ids = [selectedCampaignId];
+        console.log('Sending single campaign_id as array to backend:', [selectedCampaignId]);
+      } else {
+        // No campaign selected - backend will get all campaigns from phase if phase_id is set
+        console.log('No campaign selected - backend will use all campaigns from phase if phase_id is set');
+        // Explicitly set to null to avoid backend confusion
+        requestBody.campaign_ids = null;
+      }
       
       const response = await api.post('/show_data', requestBody);
 
@@ -687,6 +709,24 @@ export default function Home() {
       (key) => selectedColumns[key]
     );
 
+    let blob: Blob;
+    let filename: string;
+    let mimeType: string;
+
+    if (downloadFormat === 'json') {
+      // Create JSON content
+      const jsonData = filteredData.map((row) => {
+        const jsonRow: Record<string, any> = {};
+        selectedCols.forEach((col) => {
+          jsonRow[col] = (row as any)[col];
+        });
+        return jsonRow;
+      });
+      const jsonContent = JSON.stringify(jsonData, null, 2);
+      blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+      filename = `${csvFileName || 'campaign_data'}.json`;
+      mimeType = 'application/json';
+    } else {
     // Create CSV content
     const headers = selectedCols.map(col => `"${col}"`).join(',');
     const rows = filteredData.map((row) => {
@@ -698,13 +738,16 @@ export default function Home() {
         })
         .join(',');
     });
-
     const csvContent = [headers, ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      filename = `${csvFileName || 'campaign_data'}.csv`;
+      mimeType = 'text/csv';
+    }
+
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `${csvFileName || 'campaign_data'}.csv`);
+    link.setAttribute('download', filename);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -870,8 +913,10 @@ export default function Home() {
             selectedClientId={selectedClientId}
             selectedPhaseId={selectedPhaseId}
             selectedCampaignId={selectedCampaignId}
+            selectedCampaignIds={selectedCampaignIds}
             onPhaseChange={(phaseId) => setSelectedPhaseId(phaseId)}
             onCampaignChange={(campaignId) => setSelectedCampaignId(campaignId)}
+            onCampaignIdsChange={(campaignIds) => setSelectedCampaignIds(campaignIds)}
           />
         </div>
 
@@ -1025,18 +1070,29 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+                <div className="flex items-center gap-2">
+                  {/* Format Toggle Button (CSV/JSON) - Radio button style like theme toggle */}
+                  <button
+                    onClick={() => setDownloadFormat(downloadFormat === 'csv' ? 'json' : 'csv')}
+                    className="p-2 rounded-md border border-[var(--card-border)] hover:bg-[var(--table-row-hover)] transition-all duration-300 flex items-center justify-center relative w-10 h-10"
+                    title={`Switch to ${downloadFormat === 'csv' ? 'JSON' : 'CSV'} format`}
+                  >
+                    <FileText className={`w-5 h-5 text-[var(--primary)] transition-all duration-300 absolute ${downloadFormat === 'csv' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 rotate-90 scale-0'}`} />
+                    <Code className={`w-5 h-5 text-[var(--primary)] transition-all duration-300 absolute ${downloadFormat === 'json' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-0'}`} />
+                  </button>
                 <button
                   onClick={handleDownloadCSV}
                   className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors text-sm font-medium"
                 >
                   <Download size={16} />
-                  Download CSV
+                    Download {downloadFormat.toUpperCase()}
                 </button>
+                </div>
                 <input
                   type="text"
                   value={csvFileName}
                   onChange={(e) => setCsvFileName(e.target.value)}
-                  placeholder="CSV filename"
+                  placeholder={`${downloadFormat.toUpperCase()} filename`}
                   className="px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                 />
               </div>
@@ -1222,6 +1278,7 @@ export default function Home() {
           data={filteredData}
           selectedColumns={selectedColumns}
           csvFileName={csvFileName}
+            downloadFormat={downloadFormat}
           onClose={() => setShowCSVPreview(false)}
           onConfirmDownload={performCSVDownload}
         />

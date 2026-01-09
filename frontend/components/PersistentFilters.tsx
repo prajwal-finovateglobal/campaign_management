@@ -32,12 +32,17 @@ export function PersistentFilters({
       try {
         const response = await api.get('/client');
         if (!response.ok) {
+          // Don't show alert for 401 - redirect to login will handle it
+          if (response.status === 401) {
+            return;
+          }
           throw new Error('Failed to fetch clients');
         }
         const result = await response.json();
         setClients(result.clients || []);
       } catch (error) {
         console.error('Error fetching clients:', error);
+        // Only show alert if it's not a 401 (which triggers redirect)
         alert('Failed to fetch clients. Please check if the backend is running.');
       } finally {
         setLoadingClients(false);

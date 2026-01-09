@@ -13,7 +13,8 @@ class ShowDataRequest(BaseModel):
     client_id: Optional[int] = None
     table_name: Optional[str] = None
     phase_id: Optional[int] = None
-    campaign_id: Optional[int] = None
+    campaign_id: Optional[int] = None  # Keep for backward compatibility (single campaign)
+    campaign_ids: Optional[List[int]] = None  # New: support multiple campaigns
 
 class DataLog(BaseModel):
     s_no: Optional[int] = None
@@ -34,3 +35,15 @@ class DataLog(BaseModel):
 
 class ShowDataResponse(BaseModel):
     data: List[DataLog]
+
+class UpdateTableNameRequest(BaseModel):
+    table_name: str
+
+class UpdateTableNameResponse(BaseModel):
+    success: bool
+    message: str
+    table_name: str
+
+class GetTableNameResponse(BaseModel):
+    success: bool
+    table_name: str
