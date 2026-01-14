@@ -4,6 +4,15 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database, Play, Clock, XCircle, Network, FileText, BarChart, Info } from 'lucide-react';
 import { DataTable } from './DataTable';
 import { api } from '@/lib/api';
+import { batchRequests } from '@/lib/batchRequest';
+import { 
+  notifyCampaignStarted, 
+  notifyCampaignPaused, 
+  notifyCampaignUpserting, 
+  notifyCampaignReady, 
+  notifyCampaignError 
+} from '@/lib/googleChatNotification';
+import { nowIST } from '@/lib/timeUtils';
 
 interface CSVData {
   [key: string]: any;
@@ -182,6 +191,15 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [uploadingRecords, setUploadingRecords] = useState(false);
   const [formattingPhoneNumbers, setFormattingPhoneNumbers] = useState(false);
   const [phoneFormatMessage, setPhoneFormatMessage] = useState<string | null>(null);
+  
+  // 🔔 Campaign timestamp tracking for Google Chat notifications
+  const [campaignTimestamps, setCampaignTimestamps] = useState<{
+    [campaignId: number]: {
+      upsert_started_at?: number;
+      started_at?: number;
+      paused_at?: number;
+    }
+  }>({});
   
   // Inbound call upsert states
   const [showInboundCallModal, setShowInboundCallModal] = useState(false);
@@ -684,6 +702,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   };
 
   // Function to start campaign
+  // For single-type campaigns: starts the campaign directly
+  // For multiple-type campaigns: backend starts all chunks in parallel
   const handleStartCampaign = async (campaignId: number) => {
     console.log(`[FRONTEND] Start Campaign button clicked for campaign ID: ${campaignId}`);
     
@@ -696,12 +716,18 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
         cid: campaign.cid,
         phone_id: campaign.phone_id,
         agent_id: campaign.agent_id,
-        status: campaign.status
+        status: campaign.status,
+        type: campaign.type
       });
       
       // Warn if caller is not set
       if (!campaign.phone_id && !campaign.agent_id) {
         console.warn(`[FRONTEND] WARNING: Campaign ${campaignId} does not have a caller set (phone_id: ${campaign.phone_id}, agent_id: ${campaign.agent_id})`);
+      }
+      
+      // Log campaign type info
+      if (campaign.type === 'multiple') {
+        console.log(`[FRONTEND] Multiple-type campaign - backend will start all chunks in parallel`);
       }
     }
     
@@ -728,6 +754,48 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       } else {
         const result = await response.json();
         console.log(`[FRONTEND] SUCCESS: Campaign started successfully:`, result);
+        
+        // 🔔 Track start time and send notification FIRST (before alert)
+        const startedTime = nowIST();
+        setCampaignTimestamps(prev => ({
+          ...prev,
+          [campaignId]: {
+            ...prev[campaignId],
+            started_at: startedTime
+          }
+        }));
+        
+        if (campaign) {
+          // Get chunk info for notification
+          let chunkCount = 1; // Default for single-type
+          let chunkSize = 0;
+          
+          if (campaign.type === 'multiple') {
+            // For multiple-type, fetch chunks to get count
+            try {
+              const chunksResponse = await api.get(`/chunk/campaign/${campaignId}`);
+              if (chunksResponse.ok) {
+                const chunksData = await chunksResponse.json();
+                chunkCount = chunksData.chunks?.length || 0;
+                chunkSize = campaign.chunk_size || 0;
+              }
+            } catch (err) {
+              console.warn('Failed to fetch chunk count for notification:', err);
+              chunkCount = 0;
+            }
+          }
+          
+          // Send "Campaign Started" notification (before alert)
+          await notifyCampaignStarted({
+            campaign_name: campaign.campaign_name || `Campaign ${campaignId}`,
+            campaign_id: campaignId,
+            chunks: chunkCount,
+            chunk_size: chunkSize,
+            started_at: startedTime
+          }).catch(err => console.error('Failed to send started notification:', err));
+        }
+        
+        // Show success alert (after notification)
         alert(result.message || 'Campaign started successfully');
         
         // Refresh campaigns to get updated status
@@ -752,6 +820,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   };
 
   // Function to stop campaign
+  // For single-type campaigns: stops the campaign directly
+  // For multiple-type campaigns: backend stops all chunks in parallel
   const handleStopCampaign = async (campaignId: number) => {
     setStartingCampaign(campaignId);
     try {
@@ -765,6 +835,42 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
         alert(errorMessage);
       } else {
         const result = await response.json();
+        
+        // 🔔 Send "Campaign Paused" notification FIRST (before alert)
+        const campaign = campaigns.find(c => c.id === campaignId);
+        const timestamps = campaignTimestamps[campaignId];
+        
+        if (campaign && timestamps?.started_at) {
+          const pausedTime = nowIST();
+          
+          // Calculate chunks left (for multiple-type campaigns)
+          let chunksLeft = 0;
+          if (campaign.type === 'multiple') {
+            try {
+              const chunksResponse = await api.get(`/chunk/campaign/${campaignId}`);
+              if (chunksResponse.ok) {
+                const chunksData = await chunksResponse.json();
+                const runningChunks = chunksData.chunks?.filter((c: any) => 
+                  c.status === 'started' || c.status === 'running'
+                ) || [];
+                chunksLeft = runningChunks.length;
+              }
+            } catch (err) {
+              console.warn('Failed to fetch running chunks for notification:', err);
+            }
+          }
+          
+          // Send notification (before alert)
+          await notifyCampaignPaused({
+            campaign_name: campaign.campaign_name || `Campaign ${campaignId}`,
+            campaign_id: campaignId,
+            chunks_left: chunksLeft,
+            started_at: timestamps.started_at,
+            paused_at: pausedTime
+          }).catch(err => console.error('Failed to send paused notification:', err));
+        }
+        
+        // Show success alert (after notification)
         alert(result.message || 'Campaign stopped successfully');
         
         // Refresh campaigns to get updated status
@@ -943,11 +1049,25 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     setShouldStopAutoStart(false);
     shouldStopAutoStartRef.current = false; // Reset ref
     
+    // 🔔 Send "Campaign Started" notification to GChat
     try {
+      console.log('[AUTO_START] Sending campaign started notification...');
+      const notifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/started`);
+      if (notifResponse.ok) {
+        console.log('[AUTO_START] ✅ Campaign started notification sent to GChat');
+      }
+    } catch (notifError) {
+      console.error('[AUTO_START] Failed to send started notification:', notifError);
+    }
+    
+    try {
+      let stoppedByUser = false;
+      
       for (let i = 0; i < autoStartChunks.length; i++) {
         // Check if user requested to stop (check both state and ref)
         if (shouldStopAutoStartRef.current || shouldStopAutoStart) {
           console.log('[AUTO_START] Stop requested by user, terminating auto-start...');
+          stoppedByUser = true;
           alert('Auto-start stopped by user');
           break;
         }
@@ -1172,8 +1292,20 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
       }
       
       // Only show completion message if we didn't stop early
-      if (!shouldStopAutoStartRef.current) {
+      if (!shouldStopAutoStartRef.current && !stoppedByUser) {
         console.log('[AUTO_START] Auto-start sequence completed');
+        
+        // 🔔 Send "Campaign Completed" notification to GChat BEFORE the alert
+        try {
+          console.log('[AUTO_START] Sending campaign completed notification...');
+          const completeNotifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/completed`);
+          if (completeNotifResponse.ok) {
+            console.log('[AUTO_START] ✅ Campaign completed notification sent to GChat');
+          }
+        } catch (completeError) {
+          console.error('[AUTO_START] Failed to send completed notification:', completeError);
+        }
+        
         alert('Auto-start sequence completed!');
       } else {
         console.log('[AUTO_START] Auto-start sequence stopped by user');
@@ -1693,7 +1825,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                                             c.id === campaign.id 
                                               ? { ...c, status: result.status, record_count: result.record_count }
                                               : c
-                                          );
+                                        );
                                           // Maintain sort order by name (natural/numeric sorting)
                                           return updated.sort((a, b) => a.campaign_name.localeCompare(b.campaign_name, undefined, { numeric: true, sensitivity: 'base' }));
                                         });
@@ -3634,6 +3766,26 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   console.log('Campaign ID:', chunkedUpsertModal.campaignId);
                   console.log('Total Chunks:', totalChunksCount);
                   
+                  // 🔔 Track upsert start time (store in variable for later use)
+                  const upsertStartTime = nowIST();
+                  const currentCampaignId = chunkedUpsertModal.campaignId;
+                  
+                  setCampaignTimestamps(prev => ({
+                    ...prev,
+                    [currentCampaignId]: {
+                      ...prev[currentCampaignId],
+                      upsert_started_at: upsertStartTime
+                    }
+                  }));
+                  
+                  // 🔔 Send "Campaign Upserting" notification
+                  notifyCampaignUpserting({
+                    campaign_name: chunkedUpsertModal.campaignName || `Campaign ${currentCampaignId}`,
+                    campaign_id: currentCampaignId,
+                    chunks: totalChunksCount,
+                    upsert_started_at: upsertStartTime
+                  }).catch(err => console.error('Failed to send upsert notification:', err));
+                  
                   setUpsertingChunks(true);
                   setChunkProgress({});
                   
@@ -3656,14 +3808,14 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                     // Get chunk_size from the campaign (stored when chunks were created)
                     const chunkSize = chunkedUpsertModal.chunkSize || 25;
                     console.log('Using chunk size:', chunkSize, '(from campaign.chunk_size)');
+                    console.log('⚡ Processing chunks in parallel batches of 10...');
                     
                     let successCount = 0;
                     let failedChunks: string[] = [];
                     let totalRecords = 0;
                     
-                    // Process each chunk sequentially
-                    for (let i = 0; i < chunks.length; i++) {
-                      const chunk = chunks[i];
+                    // 🚀 PARALLEL PROCESSING: Create tasks for all chunks
+                    const chunkTasks = chunks.map((chunk: any, i: number) => async () => {
                       console.log(`\n--- Processing Chunk ${i + 1}/${chunks.length} ---`);
                       console.log('Chunk Name:', chunk.chunk_name);
                       console.log('Chunk ID:', chunk.id);
@@ -3705,6 +3857,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               records_count: result.records_uploaded
                             }
                           }));
+                          
+                          return { success: true, chunk, result };
                         } else {
                           const errorData = await response.json();
                           failedChunks.push(chunk.chunk_name);
@@ -3720,6 +3874,8 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               message: errorData.detail || 'Failed to upsert',
                             }
                           }));
+                          
+                          return { success: false, chunk, error: errorData.detail };
                         }
                       } catch (error: any) {
                         failedChunks.push(chunk.chunk_name);
@@ -3733,15 +3889,34 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                             message: error.message || 'Failed to upsert',
                           }
                         }));
+                        
+                        return { success: false, chunk, error: error.message };
                       }
-                    }
+                    });
+                    
+                    // Execute all tasks in parallel (max 10 concurrent)
+                    console.log(`⚡ Executing ${chunkTasks.length} tasks in batches of 10...`);
+                    await batchRequests(chunkTasks, 10);
                     
                     console.log('\n=== Upsert Complete ===');
                     console.log('Success:', successCount, '/', chunks.length);
                     console.log('Total Records:', totalRecords);
                     console.log('Failed Chunks:', failedChunks);
                     
-                    // Show final message
+                    // 🔔 Send "Campaign Ready" notification FIRST (before popup)
+                    // ✅ Use the upsertStartTime variable directly (not from state)
+                    // because React state updates are async and may not be available yet
+                    const readyTime = nowIST();
+                    await notifyCampaignReady({
+                      campaign_name: chunkedUpsertModal.campaignName || `Campaign ${currentCampaignId}`,
+                      campaign_id: currentCampaignId,
+                      chunks: chunks.length,
+                      total_records: totalRecords,
+                      upsert_started_at: upsertStartTime,
+                      ready_at: readyTime
+                    }).catch(err => console.error('Failed to send ready notification:', err));
+                    
+                    // Show final message (after notification sent)
                     const message = failedChunks.length > 0
                       ? `Successfully upserted ${successCount}/${chunks.length} chunks with ${totalRecords} records. Failed: ${failedChunks.join(', ')}`
                       : `Successfully upserted all ${successCount} chunks with ${totalRecords} records to Millis.ai!`;
@@ -3756,6 +3931,15 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   } catch (error: any) {
                     console.error('Error during chunked upsert:', error);
                     alert(`Error: ${error.message || 'Failed to upsert chunks'}`);
+                    
+                    // 🔔 Send error notification
+                    notifyCampaignError({
+                      campaign_name: chunkedUpsertModal.campaignName || `Campaign ${currentCampaignId}`,
+                      campaign_id: currentCampaignId,
+                      operation: 'Upsert All Chunks',
+                      error: error.message || 'Failed to upsert chunks',
+                      error_at: nowIST()
+                    }).catch(err => console.error('Failed to send error notification:', err));
                   } finally {
                     setUpsertingChunks(false);
                   }
@@ -3976,12 +4160,23 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 Start Multiple Chunks Campaign: {autoStartModal.campaign.campaign_name}
               </h3>
               <button
-                onClick={() => {
-                  if (isAutoStarting) {
+                onClick={async () => {
+                  if (isAutoStarting && autoStartModal.campaign) {
                     // If auto-start is running, stop it first (same as "Stop Auto Start" button)
                     console.log('[AUTO_START] Stop requested by user via X button');
                     setShouldStopAutoStart(true);
                     shouldStopAutoStartRef.current = true; // Also update ref for immediate access
+                    
+                    // 🔔 Send "Campaign Paused" notification immediately
+                    try {
+                      console.log('[AUTO_START] Sending campaign paused notification (X button)...');
+                      const pauseNotifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/paused`);
+                      if (pauseNotifResponse.ok) {
+                        console.log('[AUTO_START] ✅ Campaign paused notification sent to GChat');
+                      }
+                    } catch (pauseError) {
+                      console.error('[AUTO_START] Failed to send paused notification:', pauseError);
+                    }
                   }
                   // Close the modal
                   setAutoStartModal({ show: false, campaign: null });
@@ -4077,10 +4272,23 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   </button>
                   {isAutoStarting && (
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         console.log('[AUTO_START] Stop requested by user');
                         setShouldStopAutoStart(true);
                         shouldStopAutoStartRef.current = true; // Also update ref for immediate access
+                        
+                        // 🔔 Send "Campaign Paused" notification immediately
+                        if (autoStartModal.campaign) {
+                          try {
+                            console.log('[AUTO_START] Sending campaign paused notification...');
+                            const pauseNotifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/paused`);
+                            if (pauseNotifResponse.ok) {
+                              console.log('[AUTO_START] ✅ Campaign paused notification sent to GChat');
+                            }
+                          } catch (pauseError) {
+                            console.error('[AUTO_START] Failed to send paused notification:', pauseError);
+                          }
+                        }
                       }}
                       className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium flex items-center gap-2"
                     >

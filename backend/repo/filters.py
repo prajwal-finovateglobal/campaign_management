@@ -319,18 +319,22 @@ def filter_by_date_range(query: Query, start_time: Optional[str] = None, end_tim
                 return query
             
             # Convert to UTC timestamp (epoch)
+            # If no timezone info, assume IST (Asia/Kolkata) as that's where the data is from
             if dt.tzinfo is None:
-                # Assume UTC if no timezone info
-                dt = pytz.UTC.localize(dt)
-            else:
-                # Convert to UTC
-                dt = dt.astimezone(pytz.UTC)
+                # Assume IST (Asia/Kolkata) if no timezone info
+                ist = pytz.timezone("Asia/Kolkata")
+                dt = ist.localize(dt)
+                logger.debug(f"Assumed IST timezone for start_time: {dt}")
+            # Convert to UTC
+            dt = dt.astimezone(pytz.UTC)
             
             start_ts = dt.timestamp()
+            logger.info(f"Converted start_time '{start_time}' to epoch timestamp: {start_ts} (UTC datetime: {dt})")
             model = _get_model_from_query(query)
             if model is None:
                 logger.warning("Could not extract model from query for start_time filter")
                 return query
+            logger.debug(f"Applying filter: call_start_ts >= {start_ts}")
             query = query.filter(model.call_start_ts >= start_ts)
         except Exception as e:
             logger.error(f"Error parsing start_time {start_time}: {e}", exc_info=True)
@@ -369,14 +373,17 @@ def filter_by_date_range(query: Query, start_time: Optional[str] = None, end_tim
                 return query
             
             # Convert to UTC timestamp (epoch)
+            # If no timezone info, assume IST (Asia/Kolkata) as that's where the data is from
             if dt.tzinfo is None:
-                # Assume UTC if no timezone info
-                dt = pytz.UTC.localize(dt)
-            else:
-                # Convert to UTC
-                dt = dt.astimezone(pytz.UTC)
+                # Assume IST (Asia/Kolkata) if no timezone info
+                ist = pytz.timezone("Asia/Kolkata")
+                dt = ist.localize(dt)
+                logger.debug(f"Assumed IST timezone for end_time: {dt}")
+            # Convert to UTC
+            dt = dt.astimezone(pytz.UTC)
             
             end_ts = dt.timestamp()
+            logger.info(f"Converted end_time '{end_time}' to epoch timestamp: {end_ts} (UTC datetime: {dt})")
             model = _get_model_from_query(query)
             if model is None:
                 logger.error("Could not extract model from query for end_time filter")
@@ -388,6 +395,7 @@ def filter_by_date_range(query: Query, start_time: Optional[str] = None, end_tim
                 return query
             
             logger.debug(f"Using model {model} for end_time filter with timestamp {end_ts}")
+            logger.debug(f"Applying filter: call_start_ts <= {end_ts}")
             query = query.filter(model.call_start_ts <= end_ts)
         except Exception as e:
             logger.error(f"Error parsing end_time {end_time}: {e}", exc_info=True)
@@ -395,41 +403,6 @@ def filter_by_date_range(query: Query, start_time: Optional[str] = None, end_tim
             return query
     
     logger.debug(f"filter_by_date_range returning query: {query is not None}")
-    return query
-
-def filter_by_connected_status(query: Query, con_status: Optional[bool]) -> Query:
-    """
-    Filter query by connected status (duration is NOT NULL).
-    Works with both static DataLog and dynamic models.
-    
-    Args:
-        query: SQLAlchemy Query object (not executed).
-        con_status: Boolean - if True, filter for connected calls (duration is NOT NULL).
-    
-    Returns:
-        Modified Query object (not executed).
-    """
-    if query is None:
-        logger.warning("Cannot filter by connected status: query is None")
-        return query
-    
-    if con_status is True:
-        logger.info("Filtering by connected status: True (duration is NOT NULL)")
-        # Filter out records where duration is NULL
-        model = _get_model_from_query(query)
-        if model is None:
-            logger.warning  ("Could not extract model from query for connected_status filter")
-            return query
-        return query.filter(model.duration.isnot(None), model.recording.isnot(None))
-    elif con_status is False:
-        logger.info("Filtering by connected status: False (duration is NULL)")
-        model = _get_model_from_query(query)
-        if model is None:
-            logger.warning("Could not extract model from query for connected_status filter")
-            return query
-        return query.filter(model.duration.is_(None), model.recording.is_(None))
-    
-    # If con_status is None, return query unchanged
     return query
 
 def filter_by_agent_id(query: Query, agent_id: Optional[str]) -> Query:
@@ -450,22 +423,104 @@ def filter_by_agent_id(query: Query, agent_id: Optional[str]) -> Query:
         return query.filter(model.agent_id == agent_id)
     return query
 
-def filter_by_call_id(query: Query, call_id: Optional[str]) -> Query:
+def filter_by_connected_status(query: Query, con_status: Optional[bool]) -> Query:
     """
-    Filter query by call_id.
-    Works with both static DataLog and dynamic models.
-    
+    Filter query by connected status.
+    Connected: duration, recording, chat are NOT NULL and chat is a non-empty list ([] means disconnected).
+    Disconnected: duration, recording, chat are NULL or chat is an empty list ([]).
+
     Args:
         query: SQLAlchemy Query object (not executed).
-        call_id: Call ID to filter by.
-    
+        con_status: Boolean - if True, filter for connected calls; if False, for disconnected.
+
     Returns:
         Modified Query object (not executed).
     """
-    if call_id is not None:
-        logger.info(f"Filtering by call_id: {call_id}")
-        model = _get_model_from_query(query)
-        return query.filter(model.call_id == call_id)
+    from sqlalchemy import or_, and_, func, cast, case, text
+    from sqlalchemy.dialects import postgresql
+
+    if query is None:
+        logger.warning("Cannot filter by connected status: query is None")
+        return query
+
+    model = _get_model_from_query(query)
+    if model is None:
+        logger.warning("Could not extract model from query for connected_status filter")
+        return query
+
+    chat_field = model.chat
+
+    # For Postgres, use array_length for JSON[] arrays.
+    # For SQLite/MySQL, we can use json_array_length if available.
+    # We'll try to use the function relevant for Postgres (since chat is a true JSON list).
+
+    # Safely detect PostgreSQL dialect
+    is_postgres = False
+    try:
+        if hasattr(query, 'session') and query.session and hasattr(query.session, 'bind') and query.session.bind:
+            is_postgres = query.session.bind.dialect.name == "postgresql"
+    except Exception as e:
+        logger.warning(f"Could not detect database dialect, assuming PostgreSQL: {e}")
+        is_postgres = True  # Default to PostgreSQL since that's what the system uses
+
+    if con_status is True:
+        logger.info("Filtering by connected status: True (duration/recording/chat not NULL and chat not empty)")
+        if is_postgres:
+            # chat must be NOT NULL, be an array type, and have length > 0
+            # Use raw SQL with proper CASE expression that PostgreSQL will optimize
+            # This ensures jsonb_array_length is only evaluated when jsonb_typeof confirms it's an array
+            # Reference the column using the model's table and column name
+            table_name = model.__table__.name
+            column_name = chat_field.key if hasattr(chat_field, 'key') else 'chat'
+            return query.filter(
+                model.duration.isnot(None),
+                model.recording.isnot(None),
+                # chat_field.isnot(None),
+                # model.duration > 2
+                # text(f"CASE WHEN jsonb_typeof({table_name}.{column_name}) = 'array' THEN jsonb_array_length({table_name}.{column_name}) ELSE 0 END > 0")
+            )
+        else:
+            # try generic json_array_length support for SQLite/MySQL etc.
+            return query.filter(
+                model.duration.isnot(None),
+                model.recording.isnot(None),
+                # chat_field.isnot(None),
+                # model.duration > 2,
+                # func.json_array_length(chat_field) > 0
+            )
+    elif con_status is False:
+        logger.info("Filtering by connected status: False (duration/recording/chat NULL or chat empty)")
+        if is_postgres:
+            # For disconnected: duration/recording/chat is NULL OR chat array is empty
+            # Only check if chat is empty when it's an array type, otherwise if chat has any content, consider it connected
+            return query.filter(
+                or_(
+                    model.duration.is_(None),
+                    model.recording.is_(None),
+                    # chat_field.is_(None),
+                    # # If chat is an array, check if it's empty (length 0)
+                    # and_(
+                    #     func.jsonb_typeof(chat_field) == 'array',
+                    #     func.jsonb_array_length(chat_field) == 0
+                    # )
+                )
+            )
+        else:
+            # For non-PostgreSQL: disconnected means duration/recording/chat is NULL or chat array is empty
+            return query.filter(
+                or_(
+                    model.duration.is_(None),
+                    model.recording.is_(None),
+                    # chat_field.is_(None),
+                    # # If chat is not NULL, check if it's an array with length 0
+                    # and_(
+                    #     chat_field.isnot(None),
+                    #     func.json_array_length(chat_field) == 0
+                    # )
+                )
+            )
+
+    # If con_status is None, return query unchanged
     return query
 
 def filter_by_phase_id(query: Query, phase_id: Optional[int]) -> Query:

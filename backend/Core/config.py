@@ -28,17 +28,27 @@ DB_URL = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAM
 MILLIS_API_KEY: str = os.getenv("MILLIS_API_KEY", "")
 MILLIS_API_BASE_URL: str = "https://api-west.millis.ai"
 
+# Request Limiting Configuration
+MAX_CONCURRENT_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_REQUESTS", "50"))  # Max 50 parallel requests
+HTTP_CONNECTION_POOL_SIZE: int = 100  # Max concurrent connections in pool
+HTTP_TIMEOUT: float = 30.0  # Request timeout in seconds
+
 # Authentication Configuration
 # Supports multiple env variable names for flexibility:
 # Priority: AUTH_USER > AUTH_USERNAME > USER (to avoid conflicts with system USER variable)
 AUTH_USER: str = os.getenv("AUTH_USER", os.getenv("AUTH_USERNAME", os.getenv("USER", "")))
 AUTH_PASSWORD: str = os.getenv("AUTH_PASSWORD", os.getenv("PASSWORD", ""))
 
+# Logging Configuration
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "true").lower() in ("true", "1", "yes")
+LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "logs/app.log")
+
 
 class Settings(BaseSettings):
-    LOG_LEVEL: str = "INFO"
-    LOG_TO_FILE: bool = True
-    LOG_FILE_PATH: str = "logs/app.log"
+    LOG_LEVEL: str = LOG_LEVEL
+    LOG_TO_FILE: bool = LOG_TO_FILE
+    LOG_FILE_PATH: str = LOG_FILE_PATH
 
     model_config = {
         'extra': 'allow'

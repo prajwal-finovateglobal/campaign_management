@@ -367,7 +367,7 @@ async def upsert_all_chunks_stream(campaign_id: int, db: DB_DEPENDENCY):
 
 
 @router.post("/chunk/upsert-all", response_model=UpsertAllChunksResponse)
-def upsert_all_chunks_endpoint(request: UpsertAllChunksRequest, db: DB_DEPENDENCY):
+async def upsert_all_chunks_endpoint(request: UpsertAllChunksRequest, db: DB_DEPENDENCY):
     """
     Upsert all chunks of a campaign to Millis.ai (non-streaming version).
     Creates campaigns in Millis.ai and uploads records for all chunks.
@@ -381,7 +381,7 @@ def upsert_all_chunks_endpoint(request: UpsertAllChunksRequest, db: DB_DEPENDENC
     """
     logger.info(f"Upserting all chunks for campaign {request.campaign_id}")
     
-    success, error_msg, result = upsert_all_chunks(db, request.campaign_id)
+    success, error_msg, result = await upsert_all_chunks(db, request.campaign_id)
     
     if not success:
         raise HTTPException(status_code=400, detail=error_msg or "Failed to upsert chunks")
@@ -400,7 +400,7 @@ def upsert_all_chunks_endpoint(request: UpsertAllChunksRequest, db: DB_DEPENDENC
 
 
 @router.post("/chunk/upsert-single", response_model=UpsertSingleChunkResponse)
-def upsert_single_chunk_endpoint(request: UpsertSingleChunkRequest, db: DB_DEPENDENCY):
+async def upsert_single_chunk_endpoint(request: UpsertSingleChunkRequest, db: DB_DEPENDENCY):
     """
     Upsert a single chunk with proper record distribution.
     This endpoint is called in a loop from the frontend to ensure equal distribution.
@@ -414,7 +414,7 @@ def upsert_single_chunk_endpoint(request: UpsertSingleChunkRequest, db: DB_DEPEN
     """
     logger.info(f"Upserting chunk {request.chunk_id} at index {request.chunk_index} with size {request.chunk_size}")
     
-    success, error_msg, result = upsert_single_chunk(
+    success, error_msg, result = await upsert_single_chunk(
         db,
         request.chunk_id,
         request.chunk_index,
@@ -436,7 +436,7 @@ def upsert_single_chunk_endpoint(request: UpsertSingleChunkRequest, db: DB_DEPEN
 
 
 @router.post("/chunk/{chunk_id}/start", response_model=StartChunkResponse)
-def start_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
+async def start_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
     """
     Start a single chunk campaign in Millis.ai.
     
@@ -449,7 +449,7 @@ def start_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
     """
     logger.info(f"Starting chunk {chunk_id}")
     
-    success, error_msg, result = start_chunk_service(db, chunk_id)
+    success, error_msg, result = await start_chunk_service(db, chunk_id)
     
     if not success:
         raise HTTPException(status_code=400, detail=error_msg or "Failed to start chunk")
@@ -464,7 +464,7 @@ def start_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
 
 
 @router.post("/chunk/{chunk_id}/stop", response_model=StopChunkResponse)
-def stop_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
+async def stop_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
     """
     Stop a single chunk campaign in Millis.ai.
     
@@ -477,7 +477,7 @@ def stop_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
     """
     logger.info(f"Stopping chunk {chunk_id}")
     
-    success, error_msg, result = stop_chunk_service(db, chunk_id)
+    success, error_msg, result = await stop_chunk_service(db, chunk_id)
     
     if not success:
         raise HTTPException(status_code=400, detail=error_msg or "Failed to stop chunk")
@@ -492,7 +492,7 @@ def stop_chunk_endpoint(chunk_id: int, db: DB_DEPENDENCY):
 
 
 @router.get("/chunk/{chunk_id}/status", response_model=GetChunkStatusResponse)
-def get_chunk_status_endpoint(chunk_id: int, db: DB_DEPENDENCY):
+async def get_chunk_status_endpoint(chunk_id: int, db: DB_DEPENDENCY):
     """
     Get current status of a chunk from Millis.ai.
     
@@ -505,7 +505,7 @@ def get_chunk_status_endpoint(chunk_id: int, db: DB_DEPENDENCY):
     """
     logger.info(f"Getting status for chunk {chunk_id}")
     
-    success, error_msg, result = get_chunk_status_service(db, chunk_id)
+    success, error_msg, result = await get_chunk_status_service(db, chunk_id)
     
     if not success:
         raise HTTPException(status_code=400, detail=error_msg or "Failed to get chunk status")

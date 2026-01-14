@@ -94,3 +94,30 @@ class AddCSVRecordsResponse(BaseModel):
     message: str
     rows_added: Optional[int] = None
 
+
+class CleanCDRequest(BaseModel):
+    campaign_ids: Optional[List[int]] = None
+    phase_id: Optional[int] = None
+    client_id: Optional[int] = None
+    table_name: str
+
+
+class CleanCDResponse(BaseModel):
+    success: bool
+    message: str
+    total_records_deleted: int
+    records_deleted_per_campaign: Dict[int, int]  # campaign_id -> count
+    tone: str  # "positive", "neutral", or "danger"
+
+
+class ClearTDRequest(BaseModel):
+    client_id: int
+    table_name: str
+
+
+class ClearTDResponse(BaseModel):
+    success: bool
+    message: str
+    total_records_deleted: int
+    tone: str  # "positive", "neutral", or "danger"
+

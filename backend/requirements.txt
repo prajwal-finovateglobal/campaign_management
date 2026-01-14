@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 sqlalchemy
 psycopg2-binary
+asyncpg
 python-dotenv
 passlib[bcrypt]
 python-jose[cryptography]
@@ -15,5 +16,7 @@ langchain
 langchain-openai
 langchain-core
 requests
+httpx[http2]
+aiofiles
 pytz
 content-size-limit-asgi

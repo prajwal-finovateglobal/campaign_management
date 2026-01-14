@@ -53,6 +53,10 @@ class Campaign(Base):
     chunk_size = Column(Integer, nullable=True)  # Chunk size used when creating chunks (for multiple type)
     idx = Column(Integer, nullable=True, default=0)  # Starting index in data.csv for partial upsert (0-based)
     size = Column(Integer, nullable=True, default=0)  # Number of records to upsert from idx
+    
+    # Time tracking fields for notifications
+    started_at = Column(DateTime(timezone=True), nullable=True)  # When campaign was started
+    completed_at = Column(DateTime(timezone=True), nullable=True)  # When campaign completed
 
     # Relationships
     phase = relationship('Phase', back_populates='campaigns')

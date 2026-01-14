@@ -19,21 +19,8 @@ from typing import Annotated, Generator
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, declarative_base
-from Core.config import DB_URL, settings
-from loguru import logger
-
-# Configure logger to write to file if enabled
-if settings.LOG_TO_FILE:
-    log_file_path = parent_dir / settings.LOG_FILE_PATH
-    log_file_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.add(
-        str(log_file_path),
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-        level=settings.LOG_LEVEL,
-        rotation="10 MB",
-        retention="10 days",
-        compression="zip"
-    )
+from Core.config import DB_URL
+from Core.logging_config import logger  # Use centralized logging
 
 Base = declarative_base()
 

@@ -11,8 +11,9 @@ import { CSVPreviewModal } from '@/components/CSVPreviewModal';
 import { CampaignManagement } from '@/components/CampaignManagement';
 import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
-import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle, FileText, Code } from 'lucide-react';
+import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle, FileText, Code, Braces, Sheet } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
+import '@/components/FilterSection.css';
 
 interface DataLog {
   id?: number;
@@ -52,6 +53,17 @@ export default function Home() {
   const [deletePCDTone, setDeletePCDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
   const [deletePCDTimeout, setDeletePCDTimeout] = useState<NodeJS.Timeout | null>(null);
   const [loadingDeletePCD, setLoadingDeletePCD] = useState(false);
+  const [showDeletePCDModal, setShowDeletePCDModal] = useState(false);
+  const [cleanCDMessage, setCleanCDMessage] = useState<string | null>(null);
+  const [cleanCDTone, setCleanCDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
+  const [cleanCDTimeout, setCleanCDTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [loadingCleanCD, setLoadingCleanCD] = useState(false);
+  const [showCleanCDConfirm, setShowCleanCDConfirm] = useState(false);
+  const [clearTDMessage, setClearTDMessage] = useState<string | null>(null);
+  const [clearTDTone, setClearTDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
+  const [clearTDTimeout, setClearTDTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [loadingClearTD, setLoadingClearTD] = useState(false);
+  const [showClearTDConfirm, setShowClearTDConfirm] = useState(false);
   const [cutCCDMessage, setCutCCDMessage] = useState<string | null>(null);
   const [cutCCDTone, setCutCCDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
   const [cutCCDTimeout, setCutCCDTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -374,6 +386,22 @@ export default function Home() {
     setCutCCDMessage(null);
   };
 
+  const handleCloseCleanCDMessage = () => {
+    if (cleanCDTimeout) {
+      clearTimeout(cleanCDTimeout);
+      setCleanCDTimeout(null);
+    }
+    setCleanCDMessage(null);
+  };
+
+  const handleCloseClearTDMessage = () => {
+    if (clearTDTimeout) {
+      clearTimeout(clearTDTimeout);
+      setClearTDTimeout(null);
+    }
+    setClearTDMessage(null);
+  };
+
   const handleShowCCD = async () => {
     setShowCCDModal(true);
     setLoadingCCD(true);
@@ -504,6 +532,188 @@ export default function Home() {
       setDeletePCDMessage('Network error. Please check if backend is running.');
     } finally {
       setLoadingDeletePCD(false);
+    }
+  };
+
+  const handleCleanCD = () => {
+    // Validation: Only require client selection (phase/campaigns are optional)
+    if (!selectedClientId) {
+      setCleanCDTone('danger');
+      setCleanCDMessage('Please select a client first');
+      const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
+      setCleanCDTimeout(timeout);
+      return;
+    }
+
+    // Show confirmation modal
+    // Note: If no campaigns/phase selected, will use client-level mode (all campaigns for client)
+    setShowCleanCDConfirm(true);
+  };
+
+  const executeCleanCD = async () => {
+    // Close confirmation modal
+    setShowCleanCDConfirm(false);
+
+    setLoadingCleanCD(true);
+    setCleanCDMessage(null);
+    if (cleanCDTimeout) {
+      clearTimeout(cleanCDTimeout);
+      setCleanCDTimeout(null);
+    }
+
+    try {
+      // Prepare request payload
+      const requestBody: any = {
+        table_name: selectedClientTableName,
+      };
+
+      // Priority: campaign_ids > phase_id > client_id
+      if (selectedCampaignIds && selectedCampaignIds.length > 0) {
+        requestBody.campaign_ids = selectedCampaignIds;
+        console.log('Clean CD - Mode: Campaign-specific | campaign_ids:', selectedCampaignIds);
+      } else if (selectedPhaseId) {
+        requestBody.phase_id = selectedPhaseId;
+        console.log('Clean CD - Mode: Phase-level | phase_id:', selectedPhaseId);
+      } else if (selectedClientId) {
+        requestBody.client_id = selectedClientId;
+        console.log('Clean CD - Mode: Client-level | client_id:', selectedClientId);
+      } else {
+        setCleanCDTone('danger');
+        setCleanCDMessage('Please select a client, phase, or at least one campaign');
+        const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
+        setCleanCDTimeout(timeout);
+        setLoadingCleanCD(false);
+        return;
+      }
+
+      const response = await api.post('/campaign/clean_cd', requestBody);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorDetail = errorData.detail || errorData;
+        
+        let errorMessage = 'Failed to clean CD';
+        if (errorDetail.error) {
+          errorMessage = errorDetail.error;
+        } else if (typeof errorDetail === 'string') {
+          errorMessage = errorDetail;
+        }
+
+        const tone = errorDetail.tone || 'danger';
+        setCleanCDTone(tone as 'danger');
+        
+        const timeout = setTimeout(() => setCleanCDMessage(null), 8000);
+        setCleanCDTimeout(timeout);
+        setCleanCDMessage(errorMessage);
+        return;
+      }
+
+      const result = await response.json();
+      setCleanCDTone(result.tone || 'positive');
+      
+      // Build detailed message
+      let message = result.message || 'Clean CD completed';
+      if (result.total_records_deleted > 0 && result.records_deleted_per_campaign) {
+        const perCampaign = Object.entries(result.records_deleted_per_campaign)
+          .map(([id, count]) => `Campaign ${id}: ${count}`)
+          .join(', ');
+        message += ` (${perCampaign})`;
+      }
+      
+      const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
+      setCleanCDTimeout(timeout);
+      setCleanCDMessage(message);
+    } catch (error) {
+      console.error('Error cleaning CD:', error);
+      setCleanCDTone('danger');
+      const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
+      setCleanCDTimeout(timeout);
+      setCleanCDMessage('Network error. Please check if backend is running.');
+    } finally {
+      setLoadingCleanCD(false);
+    }
+  };
+
+  const handleClearTD = () => {
+    // Validation: Check if client is selected
+    if (!selectedClientId) {
+      setClearTDTone('danger');
+      setClearTDMessage('Please select a client first');
+      const timeout = setTimeout(() => setClearTDMessage(null), 5000);
+      setClearTDTimeout(timeout);
+      return;
+    }
+
+    // Show confirmation modal
+    setShowClearTDConfirm(true);
+  };
+
+  const executeClearTD = async () => {
+    // Close confirmation modal
+    setShowClearTDConfirm(false);
+
+    setLoadingClearTD(true);
+    setClearTDMessage(null);
+    if (clearTDTimeout) {
+      clearTimeout(clearTDTimeout);
+      setClearTDTimeout(null);
+    }
+
+    try {
+      // Prepare request payload
+      const requestBody = {
+        client_id: selectedClientId,
+        table_name: selectedClientTableName,
+      };
+
+      console.log('Clear TD - sending request:', requestBody);
+
+      const response = await api.post('/campaign/clear_td', requestBody);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorDetail = errorData.detail || errorData;
+        
+        let errorMessage = 'Failed to clear TD';
+        if (errorDetail.error) {
+          errorMessage = errorDetail.error;
+        } else if (typeof errorDetail === 'string') {
+          errorMessage = errorDetail;
+        }
+
+        const tone = errorDetail.tone || 'danger';
+        setClearTDTone(tone as 'danger');
+        
+        const timeout = setTimeout(() => setClearTDMessage(null), 8000);
+        setClearTDTimeout(timeout);
+        setClearTDMessage(errorMessage);
+        return;
+      }
+
+      const result = await response.json();
+      setClearTDTone(result.tone || 'positive');
+      
+      let message = result.message || 'Clear TD completed';
+      if (result.total_records_deleted > 0) {
+        message = `${message} (${result.total_records_deleted} records deleted)`;
+      }
+      
+      const timeout = setTimeout(() => setClearTDMessage(null), 5000);
+      setClearTDTimeout(timeout);
+      setClearTDMessage(message);
+      
+      // Reload data if filters are applied
+      if (data.length > 0) {
+        handleApplyFilters({}); // Refresh the data
+      }
+    } catch (error) {
+      console.error('Error clearing TD:', error);
+      setClearTDTone('danger');
+      const timeout = setTimeout(() => setClearTDMessage(null), 5000);
+      setClearTDTimeout(timeout);
+      setClearTDMessage('Network error. Please check if backend is running.');
+    } finally {
+      setLoadingClearTD(false);
     }
   };
 
@@ -917,8 +1127,142 @@ export default function Home() {
             onPhaseChange={(phaseId) => setSelectedPhaseId(phaseId)}
             onCampaignChange={(campaignId) => setSelectedCampaignId(campaignId)}
             onCampaignIdsChange={(campaignIds) => setSelectedCampaignIds(campaignIds)}
+            onCleanCD={handleCleanCD}
+            onClearTD={handleClearTD}
+            loadingCleanCD={loadingCleanCD}
+            loadingClearTD={loadingClearTD}
           />
         </div>
+
+        {/* Clean CD Confirmation Modal */}
+        {showCleanCDConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-2xl p-6 max-w-md w-full mx-4">
+              <div className="flex items-center gap-3 mb-4">
+                <AlertTriangle className="w-6 h-6 text-yellow-500" />
+                <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Clean CD</h3>
+              </div>
+              <p className="text-[var(--secondary)] mb-6">
+                This will delete all disconnected records that have matching contact numbers with connected records in the selected campaigns. This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowCleanCDConfirm(false)}
+                  className="px-4 py-2 bg-[var(--card-bg)] text-[var(--foreground)] border border-[var(--card-border)] rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeCleanCD}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-md hover:from-purple-600 hover:to-purple-700 transition-all"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Clear TD Confirmation Modal */}
+        {showClearTDConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-2xl p-6 max-w-md w-full mx-4">
+              <div className="flex items-center gap-3 mb-4">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+                <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Clear TD</h3>
+              </div>
+              <p className="text-[var(--secondary)] mb-6">
+                This will delete all records from the table that do NOT belong to campaigns associated with the selected client. This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowClearTDConfirm(false)}
+                  className="px-4 py-2 bg-[var(--card-bg)] text-[var(--foreground)] border border-[var(--card-border)] rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeClearTD}
+                  className="px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-md hover:from-red-600 hover:to-red-700 transition-all"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Clean CD Message Display */}
+        {cleanCDMessage && (
+          <div className={`mb-4 p-4 rounded-lg border ${
+            cleanCDTone === 'positive' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' :
+            cleanCDTone === 'neutral' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' :
+            'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+          } flex items-center justify-between`}>
+            <div className="flex items-center gap-3">
+              {cleanCDTone === 'positive' ? (
+                <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+              ) : cleanCDTone === 'neutral' ? (
+                <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              )}
+              <p className={`text-sm font-medium ${
+                cleanCDTone === 'positive' ? 'text-green-800 dark:text-green-300' :
+                cleanCDTone === 'neutral' ? 'text-blue-800 dark:text-blue-300' :
+                'text-red-800 dark:text-red-300'
+              }`}>
+                {cleanCDMessage}
+              </p>
+            </div>
+            <button
+              onClick={() => setCleanCDMessage(null)}
+              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${
+                cleanCDTone === 'positive' ? 'text-green-600 dark:text-green-400' :
+                cleanCDTone === 'neutral' ? 'text-blue-600 dark:text-blue-400' :
+                'text-red-600 dark:text-red-400'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Clear TD Message Display */}
+        {clearTDMessage && (
+          <div className={`mb-4 p-4 rounded-lg border ${
+            clearTDTone === 'positive' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' :
+            clearTDTone === 'neutral' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' :
+            'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+          } flex items-center justify-between`}>
+            <div className="flex items-center gap-3">
+              {clearTDTone === 'positive' ? (
+                <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+              ) : clearTDTone === 'neutral' ? (
+                <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              )}
+              <p className={`text-sm font-medium ${
+                clearTDTone === 'positive' ? 'text-green-800 dark:text-green-300' :
+                clearTDTone === 'neutral' ? 'text-blue-800 dark:text-blue-300' :
+                'text-red-800 dark:text-red-300'
+              }`}>
+                {clearTDMessage}
+              </p>
+            </div>
+            <button
+              onClick={() => setClearTDMessage(null)}
+              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${
+                clearTDTone === 'positive' ? 'text-green-600 dark:text-green-400' :
+                clearTDTone === 'neutral' ? 'text-blue-600 dark:text-blue-400' :
+                'text-red-600 dark:text-red-400'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Column Selection & Export Section */}
         {data.length > 0 && (
@@ -955,18 +1299,30 @@ export default function Home() {
                 <button
                   onClick={handleShowCCD}
                   disabled={loadingCCD}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="group relative px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-md font-medium flex items-center gap-2 overflow-hidden transition-all duration-300 hover:from-blue-600 hover:to-blue-700 hover:shadow-lg hover:shadow-blue-500/50 hover:scale-105 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none text-sm"
                 >
-                  {loadingCCD ? 'Loading...' : 'Show CCD'}
+                  {/* Animated background shimmer */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+                  
+                  <span className="relative z-10">{loadingCCD ? 'Loading...' : 'Show CCD'}</span>
+                  
+                  {/* Glow effect on hover */}
+                  <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-blue-400/20 via-blue-500/30 to-blue-400/20 blur-sm"></div>
                 </button>
                 <div className="relative group">
                   <button
                     onClick={handleCutCCD}
                     disabled={loadingCutCCD || data.length === 0}
-                    className="px-4 py-2 bg-orange-600 text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="group relative px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-md font-medium flex items-center gap-2 overflow-hidden transition-all duration-300 hover:from-orange-600 hover:to-orange-700 hover:shadow-lg hover:shadow-orange-500/50 hover:scale-105 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none text-sm"
                     title="Cut CCD: Delete rows from data.csv matching contact_to or phone from displayed data"
                   >
-                    {loadingCutCCD ? 'Cutting...' : 'Cut CCD'}
+                    {/* Animated background shimmer */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+                    
+                    <span className="relative z-10">{loadingCutCCD ? 'Cutting...' : 'Cut CCD'}</span>
+                    
+                    {/* Glow effect on hover */}
+                    <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-orange-400/20 via-orange-500/30 to-orange-400/20 blur-sm"></div>
                   </button>
                   {/* Warning tooltip */}
                   <div className="absolute bottom-full left-0 mb-2 w-64 p-2 bg-yellow-100 border border-yellow-400 rounded-md shadow-lg text-xs text-yellow-800 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
@@ -1008,11 +1364,17 @@ export default function Home() {
                 </div>
                 <div className="relative">
                   <button
-                    onClick={handleDeletePCD}
+                    onClick={() => setShowDeletePCDModal(true)}
                     disabled={loadingDeletePCD}
-                    className="px-4 py-2 bg-[var(--danger)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="group relative px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-md font-medium flex items-center gap-2 overflow-hidden transition-all duration-300 hover:from-red-600 hover:to-red-700 hover:shadow-lg hover:shadow-red-500/50 hover:scale-105 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none text-sm"
                   >
-                    {loadingDeletePCD ? 'Deleting...' : 'Delete PCD'}
+                    {/* Animated background shimmer */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+                    
+                    <span className="relative z-10">{loadingDeletePCD ? 'Deleting...' : 'Delete PCD'}</span>
+                    
+                    {/* Glow effect on hover */}
+                    <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-red-400/20 via-red-500/30 to-red-400/20 blur-sm"></div>
                   </button>
                   {deletePCDMessage && (
                     <div className={`absolute top-full left-0 mt-2 z-50 w-96 p-3 rounded-md shadow-lg text-sm ${
@@ -1048,9 +1410,15 @@ export default function Home() {
                   <button
                     onClick={handleLoadSDTC}
                     disabled={loadingSDTC}
-                    className="px-4 py-2 bg-[var(--success)] text-white rounded-md hover:opacity-90 transition-opacity text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="group relative px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-md font-medium flex items-center gap-2 overflow-hidden transition-all duration-300 hover:from-green-600 hover:to-green-700 hover:shadow-lg hover:shadow-green-500/50 hover:scale-105 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none text-sm"
                   >
-                    {loadingSDTC ? 'Loading...' : 'Load SDTC'}
+                    {/* Animated background shimmer */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+                    
+                    <span className="relative z-10">{loadingSDTC ? 'Loading...' : 'Load SDTC'}</span>
+                    
+                    {/* Glow effect on hover */}
+                    <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-green-400/20 via-green-500/30 to-green-400/20 blur-sm"></div>
                   </button>
                   {sdtcError && (
                     <div className="absolute top-full left-0 mt-2 z-50 w-96 p-3 bg-[var(--danger)] text-white rounded-md shadow-lg text-sm">
@@ -1074,18 +1442,30 @@ export default function Home() {
                   {/* Format Toggle Button (CSV/JSON) - Radio button style like theme toggle */}
                   <button
                     onClick={() => setDownloadFormat(downloadFormat === 'csv' ? 'json' : 'csv')}
-                    className="p-2 rounded-md border border-[var(--card-border)] hover:bg-[var(--table-row-hover)] transition-all duration-300 flex items-center justify-center relative w-10 h-10"
+                    className="group relative p-2 rounded-md border border-[var(--card-border)] bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 hover:from-blue-100 hover:to-blue-200 dark:hover:from-blue-800/30 dark:hover:to-blue-700/30 transition-all duration-300 flex items-center justify-center relative w-10 h-10 overflow-hidden hover:shadow-lg hover:shadow-blue-500/30 hover:scale-110 active:scale-100"
                     title={`Switch to ${downloadFormat === 'csv' ? 'JSON' : 'CSV'} format`}
                   >
-                    <FileText className={`w-5 h-5 text-[var(--primary)] transition-all duration-300 absolute ${downloadFormat === 'csv' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 rotate-90 scale-0'}`} />
-                    <Code className={`w-5 h-5 text-[var(--primary)] transition-all duration-300 absolute ${downloadFormat === 'json' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-0'}`} />
+                    {/* Animated background shimmer */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+                    
+                    <Sheet className={`w-5 h-5 text-blue-600 dark:text-blue-400 transition-all duration-300 absolute z-10 ${downloadFormat === 'csv' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 rotate-90 scale-0'}`} />
+                    <Braces className={`w-5 h-5 text-blue-600 dark:text-blue-400 transition-all duration-300 absolute z-10 ${downloadFormat === 'json' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-0'}`} />
+                    
+                    {/* Glow effect on hover */}
+                    <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-blue-400/10 via-blue-500/20 to-blue-400/10 blur-sm"></div>
                   </button>
                 <button
                   onClick={handleDownloadCSV}
-                  className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-md hover:bg-[var(--primary-hover)] transition-colors text-sm font-medium"
+                  className="group relative flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-md font-medium overflow-hidden transition-all duration-300 hover:from-blue-600 hover:to-blue-700 hover:shadow-lg hover:shadow-blue-500/50 hover:scale-105 active:scale-100 text-sm w-40"
                 >
-                  <Download size={16} />
-                    Download {downloadFormat.toUpperCase()}
+                  {/* Animated background shimmer */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+                  
+                  <Download size={16} className="relative z-10 filter-inject-icon flex-shrink-0" />
+                  <span className="relative z-10 whitespace-nowrap">Download {downloadFormat.toUpperCase()}</span>
+                  
+                  {/* Glow effect on hover */}
+                  <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-blue-400/20 via-blue-500/30 to-blue-400/20 blur-sm"></div>
                 </button>
                 </div>
                 <input
@@ -1691,6 +2071,61 @@ export default function Home() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete PCD Confirmation Modal */}
+      {showDeletePCDModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--card-bg)] rounded-lg border border-[var(--card-border)] shadow-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[var(--foreground)] flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-[var(--danger)]" />
+                Delete PCD
+              </h3>
+              <button
+                onClick={() => setShowDeletePCDModal(false)}
+                className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
+                disabled={loadingDeletePCD}
+              >
+                <X className="w-5 h-5 text-[var(--secondary)]" />
+              </button>
+            </div>
+            <p className="text-sm text-[var(--foreground)] mb-6">
+              Are you sure you want to delete PCD data?
+              <br />
+              <span className="text-[var(--secondary)]">This action will delete data from CSV. This cannot be undone.</span>
+            </p>
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setShowDeletePCDModal(false)}
+                disabled={loadingDeletePCD}
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowDeletePCDModal(false);
+                  await handleDeletePCD();
+                }}
+                disabled={loadingDeletePCD}
+                className="px-4 py-2 bg-[var(--danger)] text-white rounded-md text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {loadingDeletePCD ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

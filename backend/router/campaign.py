@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Query, HTTPException
 from database.dependencies import DB_DEPENDENCY
 from service.campaign import get_campaign_service, create_campaign_service, refresh_campaign_status, refresh_all_campaigns_status, delete_campaign_service, upload_csv_records_to_campaign, set_caller_service, start_campaign_service, stop_campaign_service, delete_record_service
+from service.clean_cd_service import clean_cd_service, clear_td_service
 from service.millis_api import get_phones, get_agent
 from schema.campaign import CreateCampaignRequest, CreateCampaignResponse, RefreshCampaignStatusResponse, DeleteCampaignResponse, UploadRecordsRequest, UploadRecordsResponse, GetPhonesResponse, GetAgentResponse, SetCallerRequest, SetCallerResponse, StartCampaignRequest, StartCampaignResponse, StopCampaignRequest, StopCampaignResponse, DeleteRecordRequest, DeleteRecordResponse, UpdateCampaignRangeRequest, UpdateCampaignRangeResponse
+from schema.csv import CleanCDRequest, CleanCDResponse, ClearTDRequest, ClearTDResponse
 from typing import Optional
 import loguru
 import requests
@@ -12,7 +14,7 @@ logger = loguru.logger
 
 
 @router.get("/campaign")
-def get_all_campaigns(
+async def get_all_campaigns(
     campaign_id: Optional[int] = Query(None, description="Filter by campaign ID"),
     phase_id: Optional[int] = Query(None, description="Filter by phase ID"),
     db: DB_DEPENDENCY = None
@@ -21,7 +23,7 @@ def get_all_campaigns(
     Get all campaigns, optionally filtered by campaign_id or phase_id.
     """
     logger.info(f"Fetching campaigns with campaign_id: {campaign_id}, phase_id: {phase_id}")
-    campaigns = get_campaign_service(db, campaign_id, phase_id)
+    campaigns = await get_campaign_service(db, campaign_id, phase_id)
     return {"campaigns": campaigns}
 
 
@@ -51,7 +53,7 @@ def get_campaigns_simple(
 
 
 @router.post("/campaign/create", response_model=CreateCampaignResponse)
-def create_campaign(
+async def create_campaign(
     request: CreateCampaignRequest,
     db: DB_DEPENDENCY = None
 ):
@@ -72,7 +74,7 @@ def create_campaign(
     """
     logger.info(f"Creating new campaign for phase_id: {request.phase_id}, phase_name: {request.phase_name}, type: {request.campaign_type}")
     
-    success, error_msg, campaign_data = create_campaign_service(
+    success, error_msg, campaign_data = await create_campaign_service(
         db,
         request.phase_id,
         request.phase_name,
@@ -107,7 +109,7 @@ def create_campaign(
 
 
 @router.post("/campaign/{campaign_id}/refresh-status", response_model=RefreshCampaignStatusResponse)
-def refresh_campaign_status_endpoint(
+async def refresh_campaign_status_endpoint(
     campaign_id: int,
     db: DB_DEPENDENCY = None
 ):
@@ -126,7 +128,7 @@ def refresh_campaign_status_endpoint(
     """
     logger.info(f"Refreshing status for campaign_id: {campaign_id}")
     
-    success, error_msg, campaign_data = refresh_campaign_status(db, campaign_id)
+    success, error_msg, campaign_data = await refresh_campaign_status(db, campaign_id)
     
     if not success:
         raise HTTPException(
@@ -149,7 +151,7 @@ def refresh_campaign_status_endpoint(
 
 
 @router.post("/campaign/refresh-all-status")
-def refresh_all_campaigns_status_endpoint(
+async def refresh_all_campaigns_status_endpoint(
     phase_id: Optional[int] = Query(None, description="Optional phase ID to filter campaigns"),
     db: DB_DEPENDENCY = None
 ):
@@ -167,7 +169,7 @@ def refresh_all_campaigns_status_endpoint(
     """
     logger.info(f"Refreshing status for all campaigns (phase_id: {phase_id})")
     
-    success, error_msg, campaigns_data = refresh_all_campaigns_status(db, phase_id)
+    success, error_msg, campaigns_data = await refresh_all_campaigns_status(db, phase_id)
     
     if not success:
         raise HTTPException(
@@ -190,7 +192,7 @@ def refresh_all_campaigns_status_endpoint(
 
 
 @router.delete("/campaign/{campaign_id}", response_model=DeleteCampaignResponse)
-def delete_campaign_endpoint(
+async def delete_campaign_endpoint(
     campaign_id: int,
     db: DB_DEPENDENCY = None
 ):
@@ -210,7 +212,7 @@ def delete_campaign_endpoint(
     """
     logger.info(f"Deleting campaign_id: {campaign_id}")
     
-    success, error_msg = delete_campaign_service(db, campaign_id)
+    success, error_msg = await delete_campaign_service(db, campaign_id)
     
     if not success:
         raise HTTPException(
@@ -228,7 +230,7 @@ def delete_campaign_endpoint(
 
 
 @router.post("/campaign/upload-records", response_model=UploadRecordsResponse)
-def upload_records_to_campaign_endpoint(
+async def upload_records_to_campaign_endpoint(
     request: UploadRecordsRequest,
     db: DB_DEPENDENCY = None
 ):
@@ -261,7 +263,7 @@ def upload_records_to_campaign_endpoint(
     phase = db.query(Phase).filter(Phase.id == campaign.phase_id).first()
     phase_name = phase.name if phase else "Unknown"
     
-    success, error_msg, records_uploaded = upload_csv_records_to_campaign(db, request.campaign_id)
+    success, error_msg, records_uploaded = await upload_csv_records_to_campaign(db, request.campaign_id)
     
     if not success:
         raise HTTPException(
@@ -282,7 +284,7 @@ def upload_records_to_campaign_endpoint(
 
 
 @router.get("/phones", response_model=GetPhonesResponse)
-def get_phones_endpoint():
+async def get_phones_endpoint():
     """
     Get all phones from Millis.ai API.
     
@@ -291,7 +293,7 @@ def get_phones_endpoint():
     """
     logger.info("Fetching phones from Millis.ai")
     
-    success, error_msg, phones_data = get_phones()
+    success, error_msg, phones_data = await get_phones()
     
     if not success:
         raise HTTPException(
@@ -311,7 +313,7 @@ def get_phones_endpoint():
 
 
 @router.get("/agent/{agent_id}", response_model=GetAgentResponse)
-def get_agent_endpoint(agent_id: str):
+async def get_agent_endpoint(agent_id: str):
     """
     Get agent details from Millis.ai API.
     
@@ -323,7 +325,7 @@ def get_agent_endpoint(agent_id: str):
     """
     logger.info(f"Fetching agent {agent_id} from Millis.ai")
     
-    success, error_msg, agent_data = get_agent(agent_id)
+    success, error_msg, agent_data = await get_agent(agent_id)
     
     if not success:
         raise HTTPException(
@@ -343,7 +345,7 @@ def get_agent_endpoint(agent_id: str):
 
 
 @router.post("/campaign/set_caller", response_model=SetCallerResponse)
-def set_caller_endpoint(request: SetCallerRequest, db: DB_DEPENDENCY = None):
+async def set_caller_endpoint(request: SetCallerRequest, db: DB_DEPENDENCY = None):
     """
     Set caller phone for a campaign in Millis.ai and update database.
     
@@ -356,7 +358,7 @@ def set_caller_endpoint(request: SetCallerRequest, db: DB_DEPENDENCY = None):
     """
     logger.info(f"Setting caller {request.phone_id} for campaign {request.campaign_id}")
     
-    success, error_msg, result_data = set_caller_service(db, request.campaign_id, request.phone_id)
+    success, error_msg, result_data = await set_caller_service(db, request.campaign_id, request.phone_id)
     
     if not success:
         raise HTTPException(
@@ -386,7 +388,7 @@ def set_caller_endpoint(request: SetCallerRequest, db: DB_DEPENDENCY = None):
 
 
 @router.post("/campaign/start", response_model=StartCampaignResponse)
-def start_campaign_endpoint(request: StartCampaignRequest, db: DB_DEPENDENCY = None):
+async def start_campaign_endpoint(request: StartCampaignRequest, db: DB_DEPENDENCY = None):
     """
     Start a campaign in Millis.ai.
     
@@ -400,7 +402,7 @@ def start_campaign_endpoint(request: StartCampaignRequest, db: DB_DEPENDENCY = N
     logger.info(f"[ROUTER] /campaign/start endpoint called with campaign_id: {request.campaign_id}")
     logger.info(f"[ROUTER] Request details: campaign_id={request.campaign_id}")
     
-    success, error_msg = start_campaign_service(db, request.campaign_id)
+    success, error_msg = await start_campaign_service(db, request.campaign_id)
     
     if not success:
         logger.error(f"[ROUTER] Campaign start failed: campaign_id={request.campaign_id}, error={error_msg}")
@@ -420,7 +422,7 @@ def start_campaign_endpoint(request: StartCampaignRequest, db: DB_DEPENDENCY = N
 
 
 @router.post("/campaign/stop", response_model=StopCampaignResponse)
-def stop_campaign_endpoint(request: StopCampaignRequest, db: DB_DEPENDENCY = None):
+async def stop_campaign_endpoint(request: StopCampaignRequest, db: DB_DEPENDENCY = None):
     """
     Stop a campaign in Millis.ai.
     
@@ -433,7 +435,7 @@ def stop_campaign_endpoint(request: StopCampaignRequest, db: DB_DEPENDENCY = Non
     """
     logger.info(f"Stopping campaign {request.campaign_id}")
     
-    success, error_msg = stop_campaign_service(db, request.campaign_id)
+    success, error_msg = await stop_campaign_service(db, request.campaign_id)
     
     if not success:
         raise HTTPException(
@@ -451,7 +453,7 @@ def stop_campaign_endpoint(request: StopCampaignRequest, db: DB_DEPENDENCY = Non
 
 
 @router.delete("/campaign/delete-record", response_model=DeleteRecordResponse)
-def delete_record_endpoint(request: DeleteRecordRequest, db: DB_DEPENDENCY = None):
+async def delete_record_endpoint(request: DeleteRecordRequest, db: DB_DEPENDENCY = None):
     """
     Delete a record from a campaign in Millis.ai.
     
@@ -464,7 +466,7 @@ def delete_record_endpoint(request: DeleteRecordRequest, db: DB_DEPENDENCY = Non
     """
     logger.info(f"Deleting record {request.phone} from campaign {request.campaign_id}")
     
-    success, error_msg = delete_record_service(db, request.campaign_id, request.phone)
+    success, error_msg = await delete_record_service(db, request.campaign_id, request.phone)
     
     if not success:
         raise HTTPException(
@@ -494,7 +496,7 @@ def check_launch_status():
     
     try:
         response = requests.get(
-            "https://avio.finovateglobal.com/api/health",
+            "https://avioapis.finovateglobal.com/health",
             headers={"accept": "application/json"},
             timeout=10
         )
@@ -668,4 +670,352 @@ def update_campaign_range(
                 "success": False,
                 "message": error_msg
             }
+        )
+
+@router.post("/campaign/clean_cd", response_model=CleanCDResponse)
+def clean_cd_endpoint(request: CleanCDRequest, db: DB_DEPENDENCY):
+    """
+    Clean CD: Delete disconnected records that have matching contact_to
+    with connected records for the given campaigns.
+    
+    This operation:
+    1. For each campaign_id:
+       - Separates records into connected (duration/recording/chat not NULL, chat non-empty)
+       - and disconnected (duration/recording/chat NULL or chat empty)
+    2. Finds disconnected records whose contact_to matches any connected record's contact_to
+    3. Deletes those matched disconnected records by sl_no
+    
+    Args:
+        request: CleanCDRequest with campaign_ids (optional), phase_id (optional), table_name
+        db: Database session dependency
+        
+    Returns:
+        CleanCDResponse with deletion summary
+    """
+    logger.info(f"=== CLEAN CD REQUEST ===")
+    logger.info(f"campaign_ids: {request.campaign_ids}")
+    logger.info(f"phase_id: {request.phase_id}")
+    logger.info(f"client_id: {request.client_id}")
+    logger.info(f"table_name: {request.table_name}")
+    
+    # Validate input
+    if not request.table_name:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "table_name is required",
+                "success": False,
+                "tone": "danger"
+            }
+        )
+    
+    if not request.campaign_ids and request.phase_id is None and request.client_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Either campaign_ids, phase_id, or client_id must be provided",
+                "success": False,
+                "tone": "danger"
+            }
+        )
+    
+    try:
+        success, message, total_deleted, per_campaign_deleted, tone = clean_cd_service(
+            db=db,
+            campaign_ids=request.campaign_ids,
+            phase_id=request.phase_id,
+            client_id=request.client_id,
+            table_name=request.table_name
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": message,
+                    "success": False,
+                    "tone": tone
+                }
+            )
+        
+        logger.info(f"Clean CD completed successfully: {total_deleted} records deleted")
+        return CleanCDResponse(
+            success=True,
+            message=message,
+            total_records_deleted=total_deleted,
+            records_deleted_per_campaign=per_campaign_deleted,
+            tone=tone
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in clean_cd: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": f"Unexpected error: {str(e)}",
+                "success": False,
+                "tone": "danger"
+            }
+        )
+
+
+@router.post("/campaign/clear_td", response_model=ClearTDResponse)
+def clear_td_endpoint(request: ClearTDRequest, db: DB_DEPENDENCY):
+    """
+    Clear TD (Table Data): Delete all records from the table that do NOT belong
+    to campaigns associated with the given client.
+    
+    This operation:
+    1. Fetches all phases associated with the client_id
+    2. Fetches all campaigns associated with those phases
+    3. Finds all records whose campaign_id does NOT belong to those campaigns
+    4. Deletes those records
+    
+    Args:
+        request: ClearTDRequest with client_id and table_name
+        db: Database session dependency
+        
+    Returns:
+        ClearTDResponse with deletion summary
+    """
+    logger.info(f"=== CLEAR TD REQUEST ===")
+    logger.info(f"client_id: {request.client_id}")
+    logger.info(f"table_name: {request.table_name}")
+    
+    # Validate input
+    if not request.table_name:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "table_name is required",
+                "success": False,
+                "tone": "danger"
+            }
+        )
+    
+    if not request.client_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "client_id is required",
+                "success": False,
+                "tone": "danger"
+            }
+        )
+    
+    try:
+        success, message, total_deleted, s_nos_deleted, tone = clear_td_service(
+            db=db,
+            client_id=request.client_id,
+            table_name=request.table_name
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": message,
+                    "success": False,
+                    "tone": tone
+                }
+            )
+        
+        logger.info(f"Clear TD completed successfully: {total_deleted} records deleted")
+        return ClearTDResponse(
+            success=True,
+            message=message,
+            total_records_deleted=total_deleted,
+            tone=tone
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in clear_td: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": f"Unexpected error: {str(e)}",
+                "success": False,
+                "tone": "danger"
+            }
+        )
+
+
+@router.post("/campaign/{campaign_id}/notify/started")
+async def notify_campaign_started_endpoint(campaign_id: int, db: DB_DEPENDENCY = None):
+    """
+    Send GChat notification for campaign started.
+    Used when frontend auto-start begins for multiple-type campaigns.
+    """
+    logger.info(f"Sending campaign started notification for campaign {campaign_id}")
+    
+    try:
+        from models.client import Campaign, Chunk
+        from service.time_utils import now_ist
+        from service.notification import notify_campaign_started
+        
+        # Get campaign from database
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign:
+            raise HTTPException(
+                status_code=404,
+                detail={"success": False, "message": f"Campaign {campaign_id} not found"}
+            )
+        
+        # Track start time
+        campaign.started_at = now_ist()
+        db.commit()
+        
+        # Calculate chunk statistics for multiple-type campaigns
+        total_chunks = None
+        chunks_left = None
+        current_chunk_number = None
+        
+        campaign_type = campaign.type if campaign.type else 'single'
+        if campaign_type == 'multiple':
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).order_by(Chunk.id).all()
+            if chunks:
+                total_chunks = len(chunks)
+                # Count chunks that are idle or pending (not yet started)
+                chunks_left = sum(1 for chunk in chunks if chunk.status in ['idle', 'pending', None])
+                
+                # Find current chunk number (first chunk that is 'idle', 'pending', or 'started')
+                for idx, chunk in enumerate(chunks, start=1):
+                    if chunk.status in ['idle', 'pending', 'started', None]:
+                        current_chunk_number = idx
+                        break
+                
+                logger.info(f"Campaign {campaign_id} starting: total={total_chunks}, left={chunks_left}, current chunk={current_chunk_number}")
+        
+        # Send notification
+        await notify_campaign_started(
+            campaign_name=campaign.campaign_name,
+            campaign_id=campaign_id,
+            started_at=campaign.started_at,
+            total_chunks=total_chunks,
+            chunks_left=chunks_left,
+            current_chunk_number=current_chunk_number
+        )
+        
+        return {"success": True, "message": "Notification sent successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending started notification: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": f"Failed to send notification: {str(e)}"}
+        )
+
+
+@router.post("/campaign/{campaign_id}/notify/paused")
+async def notify_campaign_paused_endpoint(campaign_id: int, db: DB_DEPENDENCY = None):
+    """
+    Send GChat notification for campaign paused.
+    Used when frontend auto-start is stopped for multiple-type campaigns.
+    """
+    logger.info(f"Sending campaign paused notification for campaign {campaign_id}")
+    
+    try:
+        from models.client import Campaign, Chunk
+        from service.time_utils import now_ist
+        from service.notification import notify_campaign_paused
+        
+        # Get campaign from database
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign:
+            raise HTTPException(
+                status_code=404,
+                detail={"success": False, "message": f"Campaign {campaign_id} not found"}
+            )
+        
+        # Calculate chunk statistics for multiple-type campaigns
+        chunks_done = None
+        chunks_left = None
+        total_chunks = None
+        
+        campaign_type = campaign.type if campaign.type else 'single'
+        if campaign_type == 'multiple':
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+            if chunks:
+                total_chunks = len(chunks)
+                # Count chunks that are finished or started (in progress or completed)
+                chunks_done = sum(1 for chunk in chunks if chunk.status in ['finished', 'started'])
+                # Count chunks that are idle or pending (not yet started)
+                chunks_left = sum(1 for chunk in chunks if chunk.status in ['idle', 'pending', None])
+                logger.info(f"Campaign {campaign_id} chunk progress: {chunks_done}/{total_chunks} done (finished+started), {chunks_left} left (idle+pending)")
+        
+        # Send notification
+        paused_at = now_ist()
+        await notify_campaign_paused(
+            campaign_name=campaign.campaign_name,
+            campaign_id=campaign_id,
+            paused_at=paused_at,
+            started_at=campaign.started_at,
+            chunks_done=chunks_done,
+            chunks_left=chunks_left,
+            total_chunks=total_chunks
+        )
+        
+        return {"success": True, "message": "Notification sent successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending paused notification: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": f"Failed to send notification: {str(e)}"}
+        )
+
+
+@router.post("/campaign/{campaign_id}/notify/completed")
+async def notify_campaign_completed_endpoint(campaign_id: int, db: DB_DEPENDENCY = None):
+    """
+    Send GChat notification for campaign completed.
+    Used when frontend auto-start completes all chunks for multiple-type campaigns.
+    """
+    logger.info(f"Sending campaign completed notification for campaign {campaign_id}")
+    
+    try:
+        from models.client import Campaign
+        from service.time_utils import now_ist
+        from service.notification import notify_campaign_completed
+        
+        # Get campaign from database
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign:
+            raise HTTPException(
+                status_code=404,
+                detail={"success": False, "message": f"Campaign {campaign_id} not found"}
+            )
+        
+        # Track completion time
+        completed_at = now_ist()
+        campaign.completed_at = completed_at
+        db.commit()
+        
+        # Send notification
+        await notify_campaign_completed(
+            campaign_name=campaign.campaign_name,
+            campaign_id=campaign_id,
+            started_at=campaign.started_at,
+            completed_at=completed_at
+        )
+        
+        return {"success": True, "message": "Notification sent successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending completed notification: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": f"Failed to send notification: {str(e)}"}
         )

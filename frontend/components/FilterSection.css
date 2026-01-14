@@ -1,0 +1,36 @@
+@keyframes injectDown {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.1);
+  }
+  100% {
+    transform: translateY(0) scale(1.1);
+  }
+}
+
+@keyframes pendulumSwing {
+  0%, 100% {
+    transform: rotate(-15deg);
+  }
+  50% {
+    transform: rotate(15deg);
+  }
+}
+
+.filter-inject-icon {
+  transition: all 0.3s ease;
+}
+
+.group:hover .filter-inject-icon {
+  animation: injectDown 0.5s ease-in-out;
+  transform: translateY(0) scale(1.1);
+}
+
+.brush-cleaning {
+  animation: pendulumSwing 0.6s ease-in-out infinite;
+  transform-origin: center center;
+  will-change: transform;
+}
+

@@ -242,7 +242,13 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
                         records_with_campaigns = db.query(DataLogModel).filter(DataLogModel.campaign_id.in_(phase_campaign_ids)).count()
                         logger.info(f"Records in table with campaign_ids matching phase_id={phase_id}: {records_with_campaigns}")
         except Exception as e:
-            logger.warning(f"Could not check campaign diagnostics: {e}")
+            logger.warning("Could not check campaign diagnostics: %s", str(e))
+            # Rollback on error to prevent transaction from being in bad state
+            try:
+                db.rollback()
+                logger.info("Transaction rolled back after campaign diagnostics query failed")
+            except Exception as rollback_error:
+                logger.error("Error during rollback after diagnostics failure: %s", str(rollback_error))
     
     # Handle campaign_ids logic:
     # 1. If campaign_ids is provided (even empty list), use it directly
@@ -274,7 +280,13 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
             final_campaign_ids = [c.id for c in all_campaigns]
             logger.info(f"⚠️ No campaign_ids provided, getting all campaigns from phase_id={phase_id} (All campaigns): {final_campaign_ids}")
         except Exception as e:
-            logger.error(f"Error getting campaigns from phase_id: {e}")
+            logger.error("Error getting campaigns from phase_id: %s", str(e))
+            # Rollback on error to prevent transaction from being in bad state
+            try:
+                db.rollback()
+                logger.info("Transaction rolled back after phase_id query failed")
+            except Exception as rollback_error:
+                logger.error("Error during rollback after phase_id query failure: %s", str(rollback_error))
             final_campaign_ids = None
     else:
         logger.info("No campaign filter - campaign_ids, campaign_id, and phase_id all None/empty")
@@ -301,15 +313,37 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
         logger.warning(f"Could not compile query SQL: {e}")
     
     # Check query count before executing
+    count_before = None
     try:
         count_before = query.count()
         logger.info(f"Query count (before all()): {count_before} rows")
     except Exception as e:
-        logger.warning(f"Could not get query count: {e}")
-        count_before = None
+        # Use % formatting to avoid KeyError when error message contains braces
+        logger.warning("Could not get query count: %s", str(e))
+        # Rollback if count fails to prevent transaction from being in bad state
+        try:
+            db.rollback()
+            logger.info("Transaction rolled back after count query failed")
+        except Exception as rollback_error:
+            logger.error("Error during rollback after count failure: %s", str(rollback_error))
+        # Don't fail the whole request if count fails, just log it
+        # The actual query execution will show the real error
     
-    results = query.all()
-    logger.info(f"Query executed: {len(results)} rows returned")
+    # Execute query with error handling
+    try:
+        results = query.all()
+        logger.info(f"Query executed: {len(results)} rows returned")
+    except Exception as e:
+        # Use % formatting to avoid KeyError when error message contains braces
+        logger.error("Error executing query: %s", str(e), exc_info=True)
+        # Rollback transaction on error (dependency will also rollback, but this is safe)
+        try:
+            db.rollback()
+            logger.info("Transaction rolled back due to query execution error")
+        except Exception as rollback_error:
+            logger.error("Error during rollback: %s", str(rollback_error))
+        # Re-raise to let the dependency handler catch it
+        raise
     
     if len(results) == 0:
         logger.warning("=== NO DATA RETURNED ===")
@@ -329,7 +363,13 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
                     base_count = base_query.count()
                     logger.info(f"Total rows in table (no filters): {base_count}")
         except Exception as e:
-            logger.warning(f"Could not check base count: {e}")
+            logger.warning("Could not check base count: %s", str(e))
+            # Rollback on error to prevent transaction from being in bad state
+            try:
+                db.rollback()
+                logger.info("Transaction rolled back after base count query failed")
+            except Exception as rollback_error:
+                logger.error("Error during rollback after base count failure: %s", str(rollback_error))
     
     # Convert results to dictionaries with human-readable datetime
     result_dicts = convert_query_results_to_dicts(results, columns)

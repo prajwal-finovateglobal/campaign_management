@@ -261,7 +261,7 @@ def delete_chunks_by_campaign(
         return False, error_msg, None
 
 
-def upsert_all_chunks(
+async def upsert_all_chunks(
     db: DB_DEPENDENCY,
     campaign_id: int
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
@@ -331,7 +331,7 @@ def upsert_all_chunks(
                 # Create campaign in Millis.ai if not already created
                 if not chunk.cid:
                     logger.info(f"Creating campaign in Millis.ai for chunk: {chunk.chunk_name}")
-                    millis_success, millis_error, millis_data = create_campaign_in_millis(chunk.chunk_name)
+                    millis_success, millis_error, millis_data = await create_campaign_in_millis(chunk.chunk_name)
                     
                     if not millis_success or not millis_data:
                         logger.error(f"Failed to create campaign in Millis.ai for chunk {chunk.chunk_name}: {millis_error}")
@@ -378,7 +378,7 @@ def upsert_all_chunks(
                 
                 # Upload formatted records to Millis.ai
                 logger.info(f"Uploading {len(formatted_records)} formatted records to chunk {chunk.chunk_name} (CID: {chunk.cid})")
-                upload_success, upload_error = upload_records_to_millis(
+                upload_success, upload_error = await upload_records_to_millis(
                     chunk.cid,
                     formatted_records
                 )
@@ -425,7 +425,7 @@ def upsert_all_chunks(
         return False, error_msg, None
 
 
-def upsert_single_chunk(
+async def upsert_single_chunk(
     db: DB_DEPENDENCY,
     chunk_id: int,
     chunk_index: int,
@@ -501,7 +501,7 @@ def upsert_single_chunk(
         # Create campaign in Millis.ai if not already created
         if not chunk.cid:
             logger.info(f"Creating campaign in Millis.ai for chunk: {chunk.chunk_name}")
-            millis_success, millis_error, millis_data = create_campaign_in_millis(chunk.chunk_name)
+            millis_success, millis_error, millis_data = await create_campaign_in_millis(chunk.chunk_name)
             
             if not millis_success or not millis_data:
                 error_msg = f"Failed to create campaign in Millis.ai: {millis_error}"
@@ -533,7 +533,7 @@ def upsert_single_chunk(
         logger.info(f"Uploading {len(formatted_records)} formatted records to chunk {chunk.chunk_name} (CID: {chunk.cid})")
         
         # Upload records to Millis.ai
-        upload_success, upload_error = upload_records_to_millis(chunk.cid, formatted_records)
+        upload_success, upload_error = await upload_records_to_millis(chunk.cid, formatted_records)
         
         if not upload_success:
             error_msg = f"Failed to upload records: {upload_error}"
@@ -566,7 +566,7 @@ def upsert_single_chunk(
         return False, error_msg, None
 
 
-def start_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def start_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Start a single chunk campaign in Millis.ai.
     
@@ -604,7 +604,7 @@ def start_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optiona
             return False, error_msg, None
         
         # Validate caller is set in Millis.ai
-        millis_success, millis_error, millis_info = get_campaign_info(chunk.cid)
+        millis_success, millis_error, millis_info = await get_campaign_info(chunk.cid)
         if not millis_success or not millis_info:
             error_msg = millis_error or f"Failed to fetch chunk info from Millis.ai"
             logger.error(error_msg)
@@ -619,7 +619,7 @@ def start_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optiona
         logger.info(f"[START_CHUNK] Caller validated: {millis_caller}")
         
         # Start campaign in Millis.ai
-        start_success, start_error = start_campaign(chunk.cid)
+        start_success, start_error = await start_campaign(chunk.cid)
         if not start_success:
             error_msg = start_error or "Failed to start chunk in Millis.ai"
             logger.error(error_msg)
@@ -641,7 +641,7 @@ def start_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optiona
         return False, error_msg, None
 
 
-def stop_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def stop_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Stop a single chunk campaign in Millis.ai.
     
@@ -670,7 +670,7 @@ def stop_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional
             return False, error_msg, None
         
         # Stop campaign in Millis.ai
-        stop_success, stop_error = stop_campaign_millis(chunk.cid)
+        stop_success, stop_error = await stop_campaign_millis(chunk.cid)
         if not stop_success:
             error_msg = stop_error or "Failed to stop chunk in Millis.ai"
             logger.error(error_msg)
@@ -692,7 +692,7 @@ def stop_chunk_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional
         return False, error_msg, None
 
 
-def get_chunk_status_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def get_chunk_status_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Get current status of a chunk from Millis.ai using the faster /info endpoint.
     Updates the status in the database.
@@ -727,7 +727,7 @@ def get_chunk_status_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bool, Op
             return True, None, result_data
         
         # Fetch status from Millis.ai using faster /info endpoint
-        success, error_msg, millis_data = get_campaign_info(chunk.cid)
+        success, error_msg, millis_data = await get_campaign_info(chunk.cid)
         
         if success and millis_data:
             new_status = millis_data.get('status', 'unknown')

@@ -5,6 +5,8 @@ from service.csv_service import read_csv_data
 from models.client import Campaign, Phase
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
+from Core.config import MAX_CONCURRENT_REQUESTS
+import asyncio
 import loguru
 
 logger = loguru.logger
@@ -64,7 +66,7 @@ def calculate_campaign_status_from_chunks(chunks: List) -> str:
         return "mixed"
 
 
-def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, phase_id: Optional[int] = None) -> List[Dict[str, Any]]:
+async def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, phase_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get campaign data from the database with enriched record counts from Millis.ai API.
     Uses DB data first, only fetches from Millis.ai if records_count is null.
@@ -125,7 +127,7 @@ def get_campaign_service(db: DB_DEPENDENCY, campaign_id: Optional[int] = None, p
     # Fetch campaign details from Millis.ai API only for campaigns with null records_count
     if cids_to_fetch:
         logger.info(f"Fetching record counts for {len(cids_to_fetch)} campaigns from Millis.ai (only those with null records_count)")
-        millis_campaigns = get_campaign_details(cids_to_fetch)
+        millis_campaigns = await get_campaign_details(cids_to_fetch)
         
         # Enrich campaigns with record counts and status from Millis.ai
         for campaign_dict in campaigns:
@@ -173,7 +175,7 @@ def generate_campaign_name(phase_name: str, phase_id: int, db: DB_DEPENDENCY) ->
     return campaign_name
 
 
-def create_campaign_service(
+async def create_campaign_service(
     db: DB_DEPENDENCY,
     phase_id: int,
     phase_name: str,
@@ -307,7 +309,7 @@ def create_campaign_service(
         
         else:
             # For single type, create in Millis.ai API
-            millis_success, millis_error, millis_data = create_campaign_in_millis(campaign_name)
+            millis_success, millis_error, millis_data = await create_campaign_in_millis(campaign_name)
             if not millis_success:
                 logger.error(f"Failed to create campaign in Millis.ai: {millis_error}")
                 return False, millis_error, None
@@ -370,7 +372,7 @@ def create_campaign_service(
         return False, error_msg, None
 
 
-def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Refresh campaign status and record count from Millis.ai API and update database.
     Uses /campaigns/{cid} endpoint to fetch both status and record count.
@@ -420,7 +422,28 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             
             # Update campaign in database
             try:
+                old_status = campaign.status
                 campaign.status = new_status
+                
+                # 🔔 Detect completion and send notification
+                if new_status == "finished" and old_status != "finished":
+                    from service.time_utils import now_ist
+                    from service.notification import notify_campaign_completed
+                    
+                    campaign.completed_at = now_ist()
+                    logger.info(f"Campaign {campaign_id} completed! Sending notification...")
+                    
+                    # Send notification (async, don't block on failure)
+                    try:
+                        await notify_campaign_completed(
+                            campaign_name=campaign.campaign_name,
+                            campaign_id=campaign_id,
+                            started_at=campaign.started_at,
+                            completed_at=campaign.completed_at
+                        )
+                    except Exception as notif_error:
+                        logger.warning(f"Failed to send completion notification: {notif_error}")
+                
                 # Note: For multiple-type campaigns, record_count is calculated from chunks, not stored in campaign
                 db.commit()
                 db.refresh(campaign)
@@ -448,7 +471,7 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         # Fetch full campaign data to get both status AND record count
         from service.millis_api import get_campaign_details
         
-        millis_campaigns = get_campaign_details([campaign.cid])
+        millis_campaigns = await get_campaign_details([campaign.cid])
         
         if not millis_campaigns or campaign.cid not in millis_campaigns:
             error_msg = f"Campaign {campaign.cid} not found in Millis.ai"
@@ -466,8 +489,29 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         
         # Update campaign status AND record count in database
         try:
+            old_status = campaign.status
             campaign.status = new_status
             campaign.records_count = new_record_count
+            
+            # 🔔 Detect completion and send notification
+            if new_status == "finished" and old_status != "finished":
+                from service.time_utils import now_ist
+                from service.notification import notify_campaign_completed
+                
+                campaign.completed_at = now_ist()
+                logger.info(f"Campaign {campaign_id} completed! Sending notification...")
+                
+                # Send notification (async, don't block on failure)
+                try:
+                    await notify_campaign_completed(
+                        campaign_name=campaign.campaign_name,
+                        campaign_id=campaign_id,
+                        started_at=campaign.started_at,
+                        completed_at=campaign.completed_at
+                    )
+                except Exception as notif_error:
+                    logger.warning(f"Failed to send completion notification: {notif_error}")
+            
             db.commit()
             db.refresh(campaign)
             logger.info(f"Campaign {campaign_id} (cid: {campaign.cid}) updated in DB: status={new_status}, records_count={new_record_count}")
@@ -491,7 +535,7 @@ def refresh_campaign_status(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         return False, error_msg, None
 
 
-def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = None) -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
+async def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = None) -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
     """
     Refresh status and record count for all campaigns (optionally filtered by phase_id) from Millis.ai API.
     Uses /campaigns/{cid} endpoint to fetch both status and record count.
@@ -568,7 +612,7 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
             if campaign.cid and campaign_type != 'multiple':
                 # Fetch full campaign data to get both status AND record count
                 from service.millis_api import get_campaign_details
-                millis_campaigns = get_campaign_details([campaign.cid])
+                millis_campaigns = await get_campaign_details([campaign.cid])
                 
                 if millis_campaigns and campaign.cid in millis_campaigns:
                     millis_data = millis_campaigns[campaign.cid]
@@ -617,7 +661,7 @@ def refresh_all_campaigns_status(db: DB_DEPENDENCY, phase_id: Optional[int] = No
         return False, error_msg, None
 
 
-def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
+async def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
     """
     Delete a campaign from both Millis.ai API and database.
     For multiple-type campaigns, deletes all chunks and their Millis.ai campaigns.
@@ -663,31 +707,76 @@ def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
             if chunks:
                 logger.info(f"Campaign {campaign_id} is multiple-type with {len(chunks)} chunks. Deleting all chunks...")
                 
+                # 🚀 PARALLEL DELETION: Separate chunks by CID existence
+                chunks_with_cid = [chunk for chunk in chunks if chunk.cid]
+                chunks_without_cid = [chunk for chunk in chunks if not chunk.cid]
+                
                 failed_chunks = []
-                for chunk in chunks:
-                    # Delete chunk from Millis.ai if it has a CID
-                    if chunk.cid:
-                        logger.info(f"Deleting chunk {chunk.chunk_name} from Millis.ai (CID: {chunk.cid})")
-                        millis_success, millis_error = delete_campaign_in_millis(chunk.cid)
-                        if not millis_success:
-                            logger.warning(f"Failed to delete chunk {chunk.chunk_name} from Millis.ai: {millis_error}")
-                            failed_chunks.append(chunk.chunk_name)
-                            # Continue with deletion even if Millis deletion fails
+                
+                if chunks_without_cid:
+                    logger.info(f"⚡ {len(chunks_without_cid)} chunks have no CID, deleting from DB only...")
+                    for chunk in chunks_without_cid:
+                        db.delete(chunk)
+                
+                if chunks_with_cid:
+                    logger.info(f"⚡ Deleting {len(chunks_with_cid)} chunks from Millis.ai in parallel (max 30 concurrent)...")
                     
-                    # Delete chunk from database
-                    db.delete(chunk)
+                    # 🚀 Create parallel deletion tasks
+                    async def delete_chunk_from_millis(chunk):
+                        """Delete a single chunk from Millis.ai"""
+                        try:
+                            logger.debug(f"Deleting chunk {chunk.chunk_name} from Millis.ai (CID: {chunk.cid})")
+                            millis_success, millis_error = await delete_campaign_in_millis(chunk.cid)
+                            
+                            if not millis_success:
+                                logger.warning(f"Failed to delete chunk {chunk.chunk_name} from Millis.ai: {millis_error}")
+                                return {'success': False, 'chunk': chunk, 'error': millis_error}
+                            
+                            logger.debug(f"✅ Deleted chunk {chunk.chunk_name} from Millis.ai")
+                            return {'success': True, 'chunk': chunk, 'error': None}
+                            
+                        except Exception as e:
+                            error_msg = f"Exception deleting chunk {chunk.chunk_name}: {str(e)}"
+                            logger.error(error_msg)
+                            return {'success': False, 'chunk': chunk, 'error': str(e)}
+                    
+                    # Execute deletions in parallel (max 30 concurrent)
+                    # Split into batches of 30
+                    batch_size = 30
+                    for i in range(0, len(chunks_with_cid), batch_size):
+                        batch = chunks_with_cid[i:i + batch_size]
+                        logger.info(f"📦 Processing deletion batch {i//batch_size + 1}/{(len(chunks_with_cid) + batch_size - 1)//batch_size} ({len(batch)} chunks)...")
+                        
+                        tasks = [delete_chunk_from_millis(chunk) for chunk in batch]
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        
+                        # Process results
+                        for result in results:
+                            if isinstance(result, Exception):
+                                logger.error(f"❌ Exception in deletion: {result}")
+                                # Don't add to failed_chunks, will be handled below
+                            elif not result['success']:
+                                failed_chunks.append(result['chunk'].chunk_name)
+                            
+                            # Delete from database regardless of Millis.ai deletion success
+                            # (allows cleanup of orphaned records)
+                            if isinstance(result, dict) and result.get('chunk'):
+                                db.delete(result['chunk'])
+                    
+                    logger.info(f"✅ Completed parallel deletion of {len(chunks_with_cid)} chunks from Millis.ai")
                 
                 if failed_chunks:
-                    logger.warning(f"Failed to delete {len(failed_chunks)} chunks from Millis.ai: {', '.join(failed_chunks)}")
+                    logger.warning(f"⚠️  Failed to delete {len(failed_chunks)} chunks from Millis.ai: {', '.join(failed_chunks[:10])}{'...' if len(failed_chunks) > 10 else ''}")
+                    logger.warning(f"💡 Database records will still be deleted to prevent orphaned data")
                 
-                logger.info(f"Deleted {len(chunks)} chunks from database")
+                logger.info(f"✅ Deleted {len(chunks)} chunks from database")
         else:
             # Handle single-type campaigns
             pass
         
         # Delete campaign from Millis.ai if CID exists
         if campaign_cid:
-            millis_success, millis_error = delete_campaign_in_millis(campaign_cid)
+            millis_success, millis_error = await delete_campaign_in_millis(campaign_cid)
             if not millis_success:
                 logger.warning(f"Failed to delete campaign from Millis.ai: {millis_error}")
                 # Continue with database deletion even if Millis.ai deletion fails
@@ -695,11 +784,31 @@ def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         else:
             logger.info(f"Campaign {campaign_id} has no CID, skipping Millis.ai deletion")
         
+        # Capture info for notification before deleting
+        chunks_count = len(chunks) if campaign_type == 'multiple' and chunks else 0
+        total_records = campaign.records_count or 0
+        
         # Delete campaign from database
         db.delete(campaign)
         db.commit()
         
         logger.info(f"Successfully deleted campaign {campaign_id} ({campaign_name}) from database")
+        
+        # 🔔 Send deletion notification
+        try:
+            from service.time_utils import now_ist
+            from service.notification import notify_campaign_deleted
+            
+            await notify_campaign_deleted(
+                campaign_name=campaign_name,
+                campaign_id=campaign_id,
+                chunks_count=chunks_count,
+                total_records=total_records,
+                deleted_at=now_ist()
+            )
+        except Exception as notif_error:
+            logger.warning(f"Failed to send deletion notification: {notif_error}")
+        
         return True, None
         
     except Exception as e:
@@ -709,7 +818,7 @@ def delete_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, 
         return False, error_msg
 
 
-def upload_csv_records_to_campaign(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str], Optional[int]]:
+async def upload_csv_records_to_campaign(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str], Optional[int]]:
     """
     Upload records from data.csv to a campaign in Millis.ai.
     
@@ -803,7 +912,7 @@ def upload_csv_records_to_campaign(db: DB_DEPENDENCY, campaign_id: int) -> Tuple
             return False, error_msg, None
         
         # Upload records to Millis.ai
-        millis_success, millis_error = upload_records_to_millis(campaign.cid, formatted_records)
+        millis_success, millis_error = await upload_records_to_millis(campaign.cid, formatted_records)
         if not millis_success:
             logger.error(f"Failed to upload records to Millis.ai: {millis_error}")
             return False, millis_error, None
@@ -817,7 +926,7 @@ def upload_csv_records_to_campaign(db: DB_DEPENDENCY, campaign_id: int) -> Tuple
         return False, error_msg, None
 
 
-def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Set caller phone for a campaign in Millis.ai and update database.
     For multiple-type campaigns, sets caller for all chunks.
@@ -858,7 +967,7 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
         campaign_type = campaign.type if campaign.type else 'single'
         
         # Get phone details to find agent_id
-        phones_success, phones_error, phones_data = get_phones()
+        phones_success, phones_error, phones_data = await get_phones()
         if not phones_success or not phones_data:
             error_msg = phones_error or "Failed to fetch phones from Millis.ai"
             logger.error(error_msg)
@@ -890,52 +999,76 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
             
             logger.info(f"Campaign {campaign_id} is multiple-type with {len(chunks)} chunks. Setting caller for all chunks...")
             
-            failed_chunks = []
-            success_count = 0
+            # 🚀 PARALLEL PROCESSING: Separate chunks by validity
+            valid_chunks = []
+            invalid_chunks = []
             
             for chunk in chunks:
                 if not chunk.cid:
                     logger.warning(f"Chunk {chunk.id} ({chunk.chunk_name}) has no CID, skipping")
-                    failed_chunks.append(chunk.chunk_name)
-                    continue
+                    invalid_chunks.append(chunk.chunk_name)
+                else:
+                    valid_chunks.append(chunk)
+            
+            if not valid_chunks:
+                error_msg = f"No valid chunks with CID found. {len(invalid_chunks)} chunks missing CID."
+                logger.error(error_msg)
+                return False, error_msg, None
+            
+            # 📊 Progress logging
+            logger.info(f"⚡ Processing {len(valid_chunks)} chunks in parallel (max {MAX_CONCURRENT_REQUESTS} concurrent)...")
+            if invalid_chunks:
+                logger.warning(f"⚠️  Skipping {len(invalid_chunks)} chunks without CID: {', '.join(invalid_chunks[:5])}{'...' if len(invalid_chunks) > 5 else ''}")
+            
+            try:
+                # 🚀 Create all tasks for parallel execution
+                tasks = [set_caller(chunk.cid, phone_id) for chunk in valid_chunks]
                 
-                # Set caller for this chunk in Millis.ai
-                millis_success, millis_error = set_caller(chunk.cid, phone_id)
-                if not millis_success:
-                    logger.error(f"Failed to set caller for chunk {chunk.chunk_name}: {millis_error}")
-                    failed_chunks.append(chunk.chunk_name)
-                    continue
+                # Execute all in parallel (semaphore limits to MAX_CONCURRENT_REQUESTS)
+                # If any fails, this will raise an exception immediately
+                results = await asyncio.gather(*tasks)
                 
-                # Update chunk in database
-                chunk.phone_id = phone_id
-                chunk.agent_id = agent_id
-                success_count += 1
-                logger.info(f"✓ Set caller for chunk {chunk.chunk_name} (CID: {chunk.cid})")
-            
-            # Update parent campaign
-            campaign.phone_id = phone_id
-            campaign.agent_id = agent_id
-            
-            db.commit()
-            
-            if failed_chunks:
-                error_msg = f"Set caller for {success_count}/{len(chunks)} chunks. Failed: {', '.join(failed_chunks)}"
-                logger.warning(error_msg)
-                if success_count == 0:
-                    return False, error_msg, None
-                # Partial success
-                return True, None, {
+                # 📊 All succeeded! Update database
+                success_count = 0
+                for chunk, (millis_success, millis_error) in zip(valid_chunks, results):
+                    if millis_success:
+                        chunk.phone_id = phone_id
+                        chunk.agent_id = agent_id
+                        success_count += 1
+                    else:
+                        # Should not happen if gather succeeds, but handle gracefully
+                        logger.error(f"Unexpected: set_caller returned False for chunk {chunk.chunk_name}: {millis_error}")
+                        error_msg = f"Failed to set caller for chunk {chunk.chunk_name}: {millis_error}"
+                        return False, error_msg, None
+                
+                # Update parent campaign
+                campaign.phone_id = phone_id
+                campaign.agent_id = agent_id
+                
+                db.commit()
+                
+                # ✅ Success message
+                logger.info(f"✅ Successfully set caller {phone_id} (agent_id: {agent_id}) for all {success_count} chunks in parallel!")
+                
+                result_data = {
                     'agent_id': agent_id,
                     'chunks_updated': success_count,
-                    'total_chunks': len(chunks)
+                    'total_chunks': len(chunks),
+                    'skipped_chunks': len(invalid_chunks)
                 }
-            
-            logger.info(f"Successfully set caller {phone_id} (agent_id: {agent_id}) for all {len(chunks)} chunks of campaign {campaign_id}")
-            return True, None, {
-                'agent_id': agent_id,
-                'chunks_updated': success_count,
-                'total_chunks': len(chunks)
-            }
+                
+                if invalid_chunks:
+                    logger.warning(f"⚠️  {len(invalid_chunks)} chunks were skipped (no CID)")
+                    result_data['skipped_chunk_names'] = invalid_chunks
+                
+                return True, None, result_data
+                
+            except Exception as e:
+                # ❌ Stop on first error and inform frontend
+                error_msg = f"Failed to set caller for chunks: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                logger.error(f"🛑 Stopped processing due to error. No chunks were updated.")
+                return False, error_msg, None
             
         else:
             # Handle single-type campaign
@@ -945,7 +1078,7 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
                 return False, error_msg, None
         
         # Set caller in Millis.ai
-        millis_success, millis_error = set_caller(campaign.cid, phone_id)
+        millis_success, millis_error = await set_caller(campaign.cid, phone_id)
         if not millis_success:
             error_msg = millis_error or "Failed to set caller in Millis.ai"
             logger.error(error_msg)
@@ -971,15 +1104,17 @@ def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str) -> Tu
         return False, error_msg, None
 
 
-def start_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
+async def start_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
     """
     Start a campaign in Millis.ai.
     
-    This function validates that:
-    1. Campaign exists in database
-    2. Campaign has a CID (Millis.ai campaign ID)
-    3. Campaign has a caller set in Millis.ai API (fetched from /campaigns/{cid}/info endpoint)
-    4. Then calls Millis.ai API to start the campaign
+    For single-type campaigns:
+    - Validates CID exists and caller is set
+    - Starts the campaign in Millis.ai
+    
+    For multiple-type campaigns:
+    - Starts all chunks in parallel
+    - Each chunk must have CID and caller set
     
     Args:
         db: Database session
@@ -999,65 +1134,136 @@ def start_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, O
             logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
             return False, error_msg
         
-        logger.info(f"[START_CAMPAIGN] Campaign found: name='{campaign.campaign_name}', cid='{campaign.cid}', phone_id='{campaign.phone_id}', agent_id='{campaign.agent_id}'")
+        campaign_type = campaign.type if campaign.type else 'single'
+        logger.info(f"[START_CAMPAIGN] Campaign found: name='{campaign.campaign_name}', type='{campaign_type}', cid='{campaign.cid}'")
         
-        # Step 2: Validate CID exists
-        if not campaign.cid:
-            error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID). Cannot start campaign without CID."
-            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
-            return False, error_msg
+        # Handle multiple-type campaigns: start all chunks
+        if campaign_type == 'multiple':
+            from models.client import Chunk
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+            
+            if not chunks:
+                error_msg = f"Campaign {campaign_id} is multiple-type but has no chunks"
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            logger.info(f"[START_CAMPAIGN] Multiple-type campaign with {len(chunks)} chunks. Starting all chunks in parallel...")
+            
+            # Validate all chunks have CID
+            chunks_without_cid = [chunk for chunk in chunks if not chunk.cid]
+            if chunks_without_cid:
+                error_msg = f"Cannot start campaign: {len(chunks_without_cid)} chunks have no CID. Please upsert all chunks first."
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            # Start all chunks in parallel
+            async def start_single_chunk(chunk):
+                """Start a single chunk and validate caller"""
+                try:
+                    # Validate caller is set
+                    millis_success, millis_error, millis_info = await get_campaign_info(chunk.cid)
+                    if not millis_success or not millis_info:
+                        return {'success': False, 'chunk': chunk.chunk_name, 'error': f"Failed to fetch chunk info: {millis_error}"}
+                    
+                    millis_caller = millis_info.get("caller")
+                    if not millis_caller:
+                        return {'success': False, 'chunk': chunk.chunk_name, 'error': "No caller set"}
+                    
+                    # Start the chunk
+                    start_success, start_error = await start_campaign(chunk.cid)
+                    if not start_success:
+                        return {'success': False, 'chunk': chunk.chunk_name, 'error': start_error}
+                    
+                    return {'success': True, 'chunk': chunk.chunk_name}
+                    
+                except Exception as e:
+                    return {'success': False, 'chunk': chunk.chunk_name, 'error': str(e)}
+            
+            # Execute in parallel with max concurrent requests
+            batch_size = MAX_CONCURRENT_REQUESTS
+            failed_chunks = []
+            
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+                logger.info(f"[START_CAMPAIGN] Starting batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size} ({len(batch)} chunks)...")
+                
+                tasks = [start_single_chunk(chunk) for chunk in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Check for failures
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[START_CAMPAIGN] Exception starting chunk: {result}")
+                        failed_chunks.append(f"Unknown chunk: {str(result)}")
+                    elif not result.get('success'):
+                        chunk_name = result.get('chunk', 'Unknown')
+                        error = result.get('error', 'Unknown error')
+                        logger.error(f"[START_CAMPAIGN] Failed to start chunk {chunk_name}: {error}")
+                        failed_chunks.append(f"{chunk_name}: {error}")
+            
+            if failed_chunks:
+                error_msg = f"Failed to start {len(failed_chunks)} chunks: {', '.join(failed_chunks[:5])}{'...' if len(failed_chunks) > 5 else ''}"
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            logger.info(f"[START_CAMPAIGN] SUCCESS: All {len(chunks)} chunks started successfully")
+            
+        else:
+            # Handle single-type campaign
+            # Step 2: Validate CID exists
+            if not campaign.cid:
+                error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID). Cannot start campaign without CID."
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            logger.info(f"[START_CAMPAIGN] Step 2: CID validation passed. CID: {campaign.cid}")
+            
+            # Step 3: Validate caller is set in Millis.ai API
+            logger.info(f"[START_CAMPAIGN] Step 3: Fetching campaign info from Millis.ai API to verify caller is set")
+            millis_success, millis_error, millis_campaign_info = await get_campaign_info(campaign.cid)
+            
+            if not millis_success or not millis_campaign_info:
+                error_msg = millis_error or f"Campaign {campaign_id} (CID: {campaign.cid}) not found in Millis.ai API"
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            millis_caller = millis_campaign_info.get("caller")
+            
+            if not millis_caller:
+                error_msg = f"Campaign {campaign_id} (CID: {campaign.cid}) has no caller set in Millis.ai API. Please set a caller phone before starting the campaign."
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            logger.info(f"[START_CAMPAIGN] Step 3: Caller validation passed. Caller: {millis_caller}")
+            
+            # Step 4: Call Millis.ai API to start campaign
+            logger.info(f"[START_CAMPAIGN] Step 4: Calling Millis.ai API to start campaign CID: {campaign.cid}")
+            millis_success, millis_error = await start_campaign(campaign.cid)
+            
+            if not millis_success:
+                error_msg = millis_error or "Failed to start campaign in Millis.ai"
+                logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            logger.info(f"[START_CAMPAIGN] SUCCESS: Campaign {campaign_id} (CID: {campaign.cid}) started successfully")
         
-        logger.info(f"[START_CAMPAIGN] Step 2: CID validation passed. CID: {campaign.cid}")
+        # 🔔 Track start time in database for completion notification later
+        from service.time_utils import now_ist
+        campaign.started_at = now_ist()
+        db.commit()
+        logger.info(f"[START_CAMPAIGN] Tracked start time: {campaign.started_at}")
         
-        # Step 3: Validate caller is set in Millis.ai API (CRITICAL CHECK - Check from API, not DB)
-        logger.info(f"[START_CAMPAIGN] Step 3: Fetching campaign info from Millis.ai API to verify caller is set")
-        millis_success, millis_error, millis_campaign_info = get_campaign_info(campaign.cid)
+        # 🔔 Send start notification
+        try:
+            from service.notification import notify_campaign_started
+            await notify_campaign_started(
+                campaign_name=campaign.campaign_name,
+                campaign_id=campaign_id,
+                started_at=campaign.started_at
+            )
+        except Exception as notif_error:
+            logger.warning(f"Failed to send start notification: {notif_error}")
         
-        if not millis_success or not millis_campaign_info:
-            error_msg = millis_error or f"Campaign {campaign_id} (CID: {campaign.cid}) not found in Millis.ai API"
-            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
-            return False, error_msg
-        
-        # Log all available fields from Millis.ai API for debugging
-        logger.info(f"[START_CAMPAIGN] Millis.ai campaign info fields: {list(millis_campaign_info.keys())}")
-        logger.debug(f"[START_CAMPAIGN] Full Millis.ai campaign info: {millis_campaign_info}")
-        
-        # Check for caller in Millis.ai API response
-        # Millis.ai API returns caller as "caller" field
-        millis_caller = millis_campaign_info.get("caller")
-        
-        # Also log DB values for reference
-        db_phone_id = campaign.phone_id
-        db_agent_id = campaign.agent_id
-        
-        logger.info(f"[START_CAMPAIGN] Caller check - Millis.ai API: caller={millis_caller}, DB: phone_id={db_phone_id}, agent_id={db_agent_id}")
-        
-        # Validate caller is set in Millis.ai API
-        if not millis_caller:
-            error_msg = f"Campaign {campaign_id} (CID: {campaign.cid}) has no caller set in Millis.ai API. Please set a caller phone before starting the campaign. Campaign cannot make calls without a caller."
-            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
-            logger.error(f"[START_CAMPAIGN] Millis.ai campaign info: {millis_campaign_info}")
-            logger.error(f"[START_CAMPAIGN] DB campaign data - phone_id: {db_phone_id}, agent_id: {db_agent_id}")
-            return False, error_msg
-        
-        logger.info(f"[START_CAMPAIGN] Step 3: Caller validation passed (from Millis.ai API). Caller: {millis_caller}")
-        
-        # Warn if DB and API are out of sync
-        if millis_caller != db_phone_id:
-            logger.warning(f"[START_CAMPAIGN] WARNING: Caller mismatch - Millis.ai API caller: {millis_caller}, DB phone_id: {db_phone_id}. Using caller from Millis.ai API.")
-        
-        # Step 4: Call Millis.ai API to start campaign
-        logger.info(f"[START_CAMPAIGN] Step 4: Calling Millis.ai API to start campaign CID: {campaign.cid}")
-        millis_success, millis_error = start_campaign(campaign.cid)
-        
-        if not millis_success:
-            error_msg = millis_error or "Failed to start campaign in Millis.ai"
-            logger.error(f"[START_CAMPAIGN] ERROR: {error_msg}")
-            logger.error(f"[START_CAMPAIGN] Campaign {campaign_id} (CID: {campaign.cid}) failed to start in Millis.ai")
-            return False, error_msg
-        
-        logger.info(f"[START_CAMPAIGN] SUCCESS: Campaign {campaign_id} (CID: {campaign.cid}) started successfully in Millis.ai")
-        logger.info(f"[START_CAMPAIGN] Campaign caller details - Millis.ai API caller: {millis_caller}, DB phone_id: {db_phone_id}, DB agent_id: {db_agent_id}")
         return True, None
         
     except Exception as e:
@@ -1067,9 +1273,15 @@ def start_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, O
         return False, error_msg
 
 
-def stop_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
+async def stop_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Optional[str]]:
     """
     Stop a campaign in Millis.ai.
+    
+    For single-type campaigns:
+    - Stops the campaign in Millis.ai
+    
+    For multiple-type campaigns:
+    - Stops all chunks in parallel
     
     Args:
         db: Database session
@@ -1078,7 +1290,7 @@ def stop_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Op
     Returns:
         Tuple of (success, error_message)
     """
-    logger.info(f"Stopping campaign {campaign_id}")
+    logger.info(f"[STOP_CAMPAIGN] Stopping campaign {campaign_id}")
     
     try:
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
@@ -1087,18 +1299,115 @@ def stop_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Op
             logger.error(error_msg)
             return False, error_msg
         
-        if not campaign.cid:
-            error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
-            logger.error(error_msg)
-            return False, error_msg
+        campaign_type = campaign.type if campaign.type else 'single'
+        logger.info(f"[STOP_CAMPAIGN] Campaign type: {campaign_type}")
         
-        millis_success, millis_error = stop_campaign_millis(campaign.cid)
-        if not millis_success:
-            error_msg = millis_error or "Failed to stop campaign in Millis.ai"
-            logger.error(error_msg)
-            return False, error_msg
+        # Handle multiple-type campaigns: stop all chunks
+        if campaign_type == 'multiple':
+            from models.client import Chunk
+            chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+            
+            if not chunks:
+                error_msg = f"Campaign {campaign_id} is multiple-type but has no chunks"
+                logger.error(f"[STOP_CAMPAIGN] ERROR: {error_msg}")
+                return False, error_msg
+            
+            logger.info(f"[STOP_CAMPAIGN] Multiple-type campaign with {len(chunks)} chunks. Stopping all chunks in parallel...")
+            
+            # Filter chunks with CID
+            chunks_with_cid = [chunk for chunk in chunks if chunk.cid]
+            
+            if not chunks_with_cid:
+                logger.warning(f"[STOP_CAMPAIGN] No chunks with CID found. Nothing to stop.")
+            else:
+                # Stop all chunks in parallel
+                async def stop_single_chunk(chunk):
+                    """Stop a single chunk"""
+                    try:
+                        stop_success, stop_error = await stop_campaign_millis(chunk.cid)
+                        if not stop_success:
+                            return {'success': False, 'chunk': chunk.chunk_name, 'error': stop_error}
+                        return {'success': True, 'chunk': chunk.chunk_name}
+                    except Exception as e:
+                        return {'success': False, 'chunk': chunk.chunk_name, 'error': str(e)}
+                
+                # Execute in parallel with max concurrent requests
+                batch_size = MAX_CONCURRENT_REQUESTS
+                failed_chunks = []
+                
+                for i in range(0, len(chunks_with_cid), batch_size):
+                    batch = chunks_with_cid[i:i + batch_size]
+                    logger.info(f"[STOP_CAMPAIGN] Stopping batch {i//batch_size + 1}/{(len(chunks_with_cid) + batch_size - 1)//batch_size} ({len(batch)} chunks)...")
+                    
+                    tasks = [stop_single_chunk(chunk) for chunk in batch]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Check for failures
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.error(f"[STOP_CAMPAIGN] Exception stopping chunk: {result}")
+                            failed_chunks.append(f"Unknown chunk: {str(result)}")
+                        elif not result.get('success'):
+                            chunk_name = result.get('chunk', 'Unknown')
+                            error = result.get('error', 'Unknown error')
+                            logger.warning(f"[STOP_CAMPAIGN] Failed to stop chunk {chunk_name}: {error}")
+                            failed_chunks.append(f"{chunk_name}: {error}")
+                
+                if failed_chunks:
+                    logger.warning(f"[STOP_CAMPAIGN] {len(failed_chunks)} chunks failed to stop: {', '.join(failed_chunks[:5])}{'...' if len(failed_chunks) > 5 else ''}")
+                    # Don't return error - partial stop is acceptable
+                
+                logger.info(f"[STOP_CAMPAIGN] Successfully stopped {len(chunks_with_cid) - len(failed_chunks)}/{len(chunks_with_cid)} chunks")
         
-        logger.info(f"Successfully stopped campaign {campaign_id}")
+        else:
+            # Handle single-type campaign
+            if not campaign.cid:
+                error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
+                logger.error(error_msg)
+                return False, error_msg
+            
+            millis_success, millis_error = await stop_campaign_millis(campaign.cid)
+            if not millis_success:
+                error_msg = millis_error or "Failed to stop campaign in Millis.ai"
+                logger.error(error_msg)
+                return False, error_msg
+            
+            logger.info(f"[STOP_CAMPAIGN] Successfully stopped campaign {campaign_id}")
+        
+        # 🔔 Send pause notification
+        try:
+            from service.time_utils import now_ist
+            from service.notification import notify_campaign_paused
+            
+            # Calculate chunk statistics for multiple-type campaigns
+            chunks_done = None
+            chunks_left = None
+            total_chunks = None
+            
+            if campaign_type == 'multiple':
+                from models.client import Chunk
+                chunks = db.query(Chunk).filter(Chunk.campaign_id == campaign_id).all()
+                if chunks:
+                    total_chunks = len(chunks)
+                    # Count chunks that are finished or started (in progress or completed)
+                    chunks_done = sum(1 for chunk in chunks if chunk.status in ['finished', 'started'])
+                    # Count chunks that are idle or pending (not yet started)
+                    chunks_left = sum(1 for chunk in chunks if chunk.status in ['idle', 'pending', None])
+                    logger.info(f"Campaign {campaign_id} chunk progress: {chunks_done}/{total_chunks} done (finished+started), {chunks_left} left (idle+pending)")
+            
+            paused_at = now_ist()
+            await notify_campaign_paused(
+                campaign_name=campaign.campaign_name,
+                campaign_id=campaign_id,
+                paused_at=paused_at,
+                started_at=campaign.started_at,
+                chunks_done=chunks_done,
+                chunks_left=chunks_left,
+                total_chunks=total_chunks
+            )
+        except Exception as notif_error:
+            logger.warning(f"Failed to send pause notification: {notif_error}")
+        
         return True, None
         
     except Exception as e:
@@ -1107,7 +1416,7 @@ def stop_campaign_service(db: DB_DEPENDENCY, campaign_id: int) -> Tuple[bool, Op
         return False, error_msg
 
 
-def delete_record_service(db: DB_DEPENDENCY, campaign_id: int, phone: str) -> Tuple[bool, Optional[str]]:
+async def delete_record_service(db: DB_DEPENDENCY, campaign_id: int, phone: str) -> Tuple[bool, Optional[str]]:
     """
     Delete a record from a campaign in Millis.ai.
     
@@ -1133,7 +1442,7 @@ def delete_record_service(db: DB_DEPENDENCY, campaign_id: int, phone: str) -> Tu
             logger.error(error_msg)
             return False, error_msg
         
-        millis_success, millis_error = delete_record_millis(campaign.cid, phone)
+        millis_success, millis_error = await delete_record_millis(campaign.cid, phone)
         if not millis_success:
             error_msg = millis_error or "Failed to delete record in Millis.ai"
             logger.error(error_msg)

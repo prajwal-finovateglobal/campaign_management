@@ -2,6 +2,10 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+# Configure logging FIRST (before any other imports that use logger)
+from Core.logging_config import logger
+
 from router.show_data import router as show_data_router
 from router.csv import router as csv_router
 from router.client import router as client_router

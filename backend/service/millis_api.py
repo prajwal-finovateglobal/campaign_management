@@ -1,19 +1,72 @@
 """
 Service for interacting with Millis.ai API.
 Handles fetching campaign details and record counts.
+NOW WITH REQUEST BATCHING: Limits concurrent requests to prevent overload!
 """
-import requests
+import httpx
+import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 import loguru
-from Core.config import MILLIS_API_KEY, MILLIS_API_BASE_URL
+from Core.config import MILLIS_API_KEY, MILLIS_API_BASE_URL, MAX_CONCURRENT_REQUESTS, HTTP_CONNECTION_POOL_SIZE, HTTP_TIMEOUT
 
 logger = loguru.logger.bind(service="millis_api")
 
+# Shared HTTP client with connection pooling and limits
+_http_client: Optional[httpx.AsyncClient] = None
+_semaphore: Optional[asyncio.Semaphore] = None
 
-def get_campaign_details(cids: List[str]) -> Dict[str, Dict[str, Any]]:
+
+def get_http_client() -> httpx.AsyncClient:
+    """Get or create shared HTTP client with connection pooling."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        limits = httpx.Limits(
+            max_connections=HTTP_CONNECTION_POOL_SIZE,
+            max_keepalive_connections=20
+        )
+        _http_client = httpx.AsyncClient(
+            limits=limits,
+            timeout=HTTP_TIMEOUT,
+            http2=True  # Enable HTTP/2 for better performance
+        )
+    return _http_client
+
+
+def get_semaphore() -> asyncio.Semaphore:
+    """Get or create semaphore for limiting concurrent requests."""
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        logger.info(f"Created request semaphore with limit: {MAX_CONCURRENT_REQUESTS}")
+    return _semaphore
+
+
+async def batch_process(items: List[Any], process_func, batch_size: int = MAX_CONCURRENT_REQUESTS) -> List[Any]:
+    """
+    Process items in batches to avoid overwhelming the system.
+    
+    Args:
+        items: List of items to process
+        process_func: Async function to process each item
+        batch_size: Maximum concurrent operations (default: MAX_CONCURRENT_REQUESTS)
+    
+    Returns:
+        List of results
+    """
+    results = []
+    for i in range(0, len(items), batch_size):
+        batch = items[i:i + batch_size]
+        logger.debug(f"Processing batch {i//batch_size + 1}/{(len(items)-1)//batch_size + 1} ({len(batch)} items)")
+        batch_results = await asyncio.gather(*[process_func(item) for item in batch])
+        results.extend(batch_results)
+    return results
+
+
+async def get_campaign_details(cids: List[str]) -> Dict[str, Dict[str, Any]]:
     """
     Fetch campaign details from Millis.ai API for given campaign IDs.
     Uses individual campaign endpoint /campaigns/{cid} for each CID.
+    NOW WITH BATCHING: Processes max 50 requests at a time to prevent overload!
     
     Args:
         cids: List of campaign IDs (cid) to fetch details for
@@ -39,49 +92,63 @@ def get_campaign_details(cids: List[str]) -> Dict[str, Dict[str, Any]]:
         logger.info("No CIDs provided, returning empty dict")
         return {}
     
-    cid_to_campaign = {}
     headers = {
         "authorization": MILLIS_API_KEY
     }
     
-    logger.info(f"Fetching campaign details for {len(cids)} CIDs from Millis.ai using individual endpoints")
+    logger.info(f"Fetching campaign details for {len(cids)} CIDs (batched: max {MAX_CONCURRENT_REQUESTS} at a time)")
     
-    # Fetch each campaign individually using /campaigns/{cid} endpoint
-    for cid in cids:
-        try:
-            url = f"{MILLIS_API_BASE_URL}/campaigns/{cid}"
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                campaign = response.json()
-                # Count records
-                records = campaign.get("records", [])
-                record_count = len(records) if records else 0
-                
-                # Extract status directly from API response
-                status = campaign.get("status")
-                
-                cid_to_campaign[cid] = {
-                    **campaign,
-                    "record_count": record_count,
-                    "status": status
-                }
-                logger.debug(f"Fetched campaign {cid} with {record_count} records, status: {status}")
-            else:
-                logger.warning(f"Failed to fetch campaign {cid}: status {response.status_code}")
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching campaign {cid} from Millis.ai: {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Unexpected error fetching campaign {cid}: {e}")
-            continue
+    semaphore = get_semaphore()
+    client = get_http_client()
     
-    logger.info(f"Successfully fetched {len(cid_to_campaign)} campaigns out of {len(cids)} requested")
+    async def fetch_single_campaign(cid: str) -> tuple[str, Optional[Dict[str, Any]]]:
+        """Fetch a single campaign asynchronously with rate limiting"""
+        async with semaphore:  # Limit concurrent requests
+            try:
+                url = f"{MILLIS_API_BASE_URL}/campaigns/{cid}"
+                response = await client.get(url, headers=headers, timeout=HTTP_TIMEOUT)
+                
+                if response.status_code == 200:
+                    campaign = response.json()
+                    # Count records
+                    records = campaign.get("records", [])
+                    record_count = len(records) if records else 0
+                    
+                    # Extract status directly from API response
+                    status = campaign.get("status")
+                    
+                    result = {
+                        **campaign,
+                        "record_count": record_count,
+                        "status": status
+                    }
+                    logger.debug(f"✓ Fetched campaign {cid}: {record_count} records, status: {status}")
+                    return cid, result
+                else:
+                    logger.warning(f"✗ Failed to fetch campaign {cid}: HTTP {response.status_code}")
+                    return cid, None
+                    
+            except httpx.RequestError as e:
+                logger.error(f"✗ Request error fetching campaign {cid}: {e}")
+                return cid, None
+            except Exception as e:
+                logger.error(f"✗ Unexpected error fetching campaign {cid}: {e}")
+                return cid, None
+    
+    # Fetch all campaigns with automatic batching via semaphore
+    tasks = [fetch_single_campaign(cid) for cid in cids]
+    results = await asyncio.gather(*tasks)
+    
+    cid_to_campaign = {}
+    for cid, campaign_data in results:
+        if campaign_data is not None:
+            cid_to_campaign[cid] = campaign_data
+    
+    logger.info(f"✓ Successfully fetched {len(cid_to_campaign)}/{len(cids)} campaigns")
     return cid_to_campaign
 
 
-def get_campaign_record_count(cid: str) -> Optional[int]:
+async def get_campaign_record_count(cid: str) -> Optional[int]:
     """
     Get record count for a single campaign ID.
     
@@ -94,13 +161,13 @@ def get_campaign_record_count(cid: str) -> Optional[int]:
     if not cid:
         return None
     
-    campaign_details = get_campaign_details([cid])
+    campaign_details = await get_campaign_details([cid])
     if cid in campaign_details:
         return campaign_details[cid].get("record_count")
     return None
 
 
-def delete_campaign_in_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
+async def delete_campaign_in_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
     """
     Delete a campaign from Millis.ai API.
     
@@ -129,7 +196,8 @@ def delete_campaign_in_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
         }
         
         logger.info(f"Deleting campaign '{campaign_id}' from Millis.ai")
-        response = requests.delete(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.delete(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code not in [200, 204]:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -139,7 +207,7 @@ def delete_campaign_in_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
         logger.info(f"Successfully deleted campaign {campaign_id} from Millis.ai")
         return True, None
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error deleting campaign from Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg
@@ -149,7 +217,7 @@ def delete_campaign_in_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
         return False, error_msg
 
 
-def upload_records_to_millis(campaign_id: str, records: List[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
+async def upload_records_to_millis(campaign_id: str, records: List[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
     """
     Upload records to a campaign in Millis.ai API.
     
@@ -195,7 +263,8 @@ def upload_records_to_millis(campaign_id: str, records: List[Dict[str, Any]]) ->
             formatted_records.append(formatted_record)
         
         logger.info(f"Uploading {len(formatted_records)} records to campaign {campaign_id} in Millis.ai")
-        response = requests.post(url, json=formatted_records, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.post(url, json=formatted_records, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code not in [200, 201]:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -205,7 +274,7 @@ def upload_records_to_millis(campaign_id: str, records: List[Dict[str, Any]]) ->
         logger.info(f"Successfully uploaded {len(formatted_records)} records to campaign {campaign_id}")
         return True, None
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error uploading records to Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg
@@ -215,7 +284,7 @@ def upload_records_to_millis(campaign_id: str, records: List[Dict[str, Any]]) ->
         return False, error_msg
 
 
-def create_campaign_in_millis(campaign_name: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def create_campaign_in_millis(campaign_name: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Create a campaign in Millis.ai API.
     
@@ -257,7 +326,8 @@ def create_campaign_in_millis(campaign_name: str) -> Tuple[bool, Optional[str], 
         }
         
         logger.info(f"Creating campaign '{campaign_name}' in Millis.ai")
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.post(url, json=payload, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code != 200:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -284,7 +354,7 @@ def create_campaign_in_millis(campaign_name: str) -> Tuple[bool, Optional[str], 
             "record_count": record_count
         }
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error creating campaign in Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg, None
@@ -294,7 +364,7 @@ def create_campaign_in_millis(campaign_name: str) -> Tuple[bool, Optional[str], 
         return False, error_msg, None
 
 
-def get_phones() -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
+async def get_phones() -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
     """
     Get all phones from Millis.ai API.
     
@@ -325,7 +395,8 @@ def get_phones() -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
         }
         
         logger.info("Fetching phones from Millis.ai")
-        response = requests.get(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.get(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code != 200:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -337,7 +408,7 @@ def get_phones() -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
         
         return True, None, phones_data
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error fetching phones from Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg, None
@@ -347,7 +418,7 @@ def get_phones() -> Tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
         return False, error_msg, None
 
 
-def get_agent(agent_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def get_agent(agent_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Get agent details from Millis.ai API.
     
@@ -383,7 +454,8 @@ def get_agent(agent_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, An
         }
         
         logger.info(f"Fetching agent {agent_id} from Millis.ai")
-        response = requests.get(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.get(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code != 200:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -395,7 +467,7 @@ def get_agent(agent_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, An
         
         return True, None, agent_data
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error fetching agent from Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg, None
@@ -405,7 +477,7 @@ def get_agent(agent_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, An
         return False, error_msg, None
 
 
-def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]]:
+async def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]]:
     """
     Set caller phone for a campaign in Millis.ai API.
     
@@ -444,7 +516,8 @@ def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]
         }
         
         logger.info(f"Setting caller {caller_phone} for campaign {campaign_id} in Millis.ai")
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.post(url, json=payload, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code != 200:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -485,7 +558,7 @@ def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]
                 logger.error(error_msg)
                 return False, error_msg
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error setting caller in Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg
@@ -495,7 +568,7 @@ def set_caller(campaign_id: str, caller_phone: str) -> Tuple[bool, Optional[str]
         return False, error_msg
 
 
-def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+async def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Get campaign info from Millis.ai API using /campaigns/{cid}/info endpoint.
     
@@ -530,7 +603,8 @@ def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[D
         logger.info(f"[MILLIS_API] URL: {url}")
         logger.info(f"[MILLIS_API] Campaign ID (CID): {campaign_id}")
         
-        response = requests.get(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.get(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         logger.info(f"[MILLIS_API] Response received - Status Code: {response.status_code}")
         
@@ -550,7 +624,7 @@ def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[D
             logger.error(f"[MILLIS_API] ERROR: {error_msg}")
             return False, error_msg, None
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error fetching campaign info from Millis.ai: {e}"
         logger.error(f"[MILLIS_API] REQUEST_EXCEPTION: {error_msg}")
         logger.exception(f"[MILLIS_API] Full exception traceback for campaign {campaign_id}")
@@ -562,7 +636,7 @@ def get_campaign_info(campaign_id: str) -> Tuple[bool, Optional[str], Optional[D
         return False, error_msg, None
 
 
-def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
+async def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
     """
     Start a campaign in Millis.ai API.
     
@@ -601,7 +675,8 @@ def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
         logger.info(f"[MILLIS_API] Headers: authorization=[REDACTED]")
         
         # Make API request
-        response = requests.post(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.post(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         logger.info(f"[MILLIS_API] Response received - Status Code: {response.status_code}")
         
@@ -642,7 +717,7 @@ def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
                 logger.error(f"[MILLIS_API] ERROR: {error_msg}")
                 return False, error_msg
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error starting campaign in Millis.ai: {e}"
         logger.error(f"[MILLIS_API] REQUEST_EXCEPTION: {error_msg}")
         logger.exception(f"[MILLIS_API] Full exception traceback for campaign {campaign_id}")
@@ -654,7 +729,7 @@ def start_campaign(campaign_id: str) -> Tuple[bool, Optional[str]]:
         return False, error_msg
 
 
-def stop_campaign_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
+async def stop_campaign_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
     """
     Stop a campaign in Millis.ai API.
     
@@ -683,7 +758,8 @@ def stop_campaign_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
         }
         
         logger.info(f"Stopping campaign {campaign_id} in Millis.ai")
-        response = requests.post(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.post(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code != 200:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -720,7 +796,7 @@ def stop_campaign_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
                 logger.error(error_msg)
                 return False, error_msg
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error stopping campaign in Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg
@@ -730,7 +806,7 @@ def stop_campaign_millis(campaign_id: str) -> Tuple[bool, Optional[str]]:
         return False, error_msg
 
 
-def delete_record_millis(campaign_id: str, phone: str) -> Tuple[bool, Optional[str]]:
+async def delete_record_millis(campaign_id: str, phone: str) -> Tuple[bool, Optional[str]]:
     """
     Delete a record from a campaign in Millis.ai API.
     
@@ -765,7 +841,8 @@ def delete_record_millis(campaign_id: str, phone: str) -> Tuple[bool, Optional[s
         }
         
         logger.info(f"Deleting record {phone} from campaign {campaign_id} in Millis.ai")
-        response = requests.delete(url, headers=headers, timeout=30)
+        client = get_http_client()
+        response = await client.delete(url, headers=headers, timeout=HTTP_TIMEOUT)
         
         if response.status_code not in [200, 204]:
             error_msg = f"Millis.ai API returned status {response.status_code}: {response.text}"
@@ -802,7 +879,7 @@ def delete_record_millis(campaign_id: str, phone: str) -> Tuple[bool, Optional[s
                 logger.error(error_msg)
                 return False, error_msg
         
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         error_msg = f"Error deleting record in Millis.ai: {e}"
         logger.error(error_msg)
         return False, error_msg
