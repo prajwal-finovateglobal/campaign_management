@@ -235,7 +235,7 @@ export default function Home() {
           
           // Apply preset
           if (presetToApply === 'simple') {
-            const simpleColumns = ['call_start_time', 'chat', 'contact_to', 'direction', 'duration', 'recording'];
+            const simpleColumns = ['call_start_time', 'chat', 'contact_to', 'direction', 'duration', 'recording', 'campaign_id'];
             simpleColumns.forEach((col) => {
               if (availableColumns.includes(col)) {
                 columns[col] = true;
@@ -326,8 +326,8 @@ export default function Home() {
 
     // Apply preset
     if (preset === 'simple') {
-      // Simple preset: call_start_time, chat, contact_to, direction, duration, recording
-      const simpleColumns = ['call_start_time', 'chat', 'contact_to', 'direction', 'duration', 'recording'];
+      // Simple preset: call_start_time, chat, contact_to, direction, duration, recording, campaign_id
+      const simpleColumns = ['call_start_time', 'chat', 'contact_to', 'direction', 'duration', 'recording', 'campaign_id'];
       simpleColumns.forEach((col) => {
         if (allColumns.includes(col)) {
           newColumns[col] = true;

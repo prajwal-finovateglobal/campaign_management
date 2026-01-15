@@ -32,6 +32,7 @@ class DataLog(BaseModel):
     language: Optional[str] = None
     cost: Optional[float] = None
     meta_data: Optional[Union[dict, list, str]] = None  # Can be dict, list, or string (JSON)
+    campaign_id: Optional[int] = None
 
 class ShowDataResponse(BaseModel):
     data: List[DataLog]

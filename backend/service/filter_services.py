@@ -147,6 +147,7 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
         'call_start_ts',  # Keep for conversion to call_start_time
         'chat',
         'contact_to',
+        'campaign_id',
         'contact_from',
         'provider',
         'direction',
@@ -157,14 +158,8 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
         'model',
         'language',
         'cost',
-        'meta_data'
+        'meta_data',
     ]
-    
-    # Add campaign_id to columns if filtering by phase_id (needed for join)
-    # Even if campaign_id filter is not set, we need it to join with Campaign table for phase filtering
-    if phase_id is not None and 'campaign_id' not in columns:
-        columns.append('campaign_id')
-        logger.info("Added campaign_id to selected columns for phase_id filtering")
     
     # Build query with selected columns (NOT executed yet)
     # Use client_id or table_name if provided, otherwise use default DataLog table
