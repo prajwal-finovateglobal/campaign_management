@@ -1002,23 +1002,50 @@ async def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str)
             # 🚀 PARALLEL PROCESSING: Separate chunks by validity
             valid_chunks = []
             invalid_chunks = []
+            completed_chunks = []
             
             for chunk in chunks:
+                # Log chunk details for debugging
+                logger.info(f"Checking chunk {chunk.id} ({chunk.chunk_name}): cid={chunk.cid}, status={repr(chunk.status)}")
+                
                 if not chunk.cid:
                     logger.warning(f"Chunk {chunk.id} ({chunk.chunk_name}) has no CID, skipping")
                     invalid_chunks.append(chunk.chunk_name)
+                elif chunk.status and chunk.status.lower() != 'idle':
+                    # Skip chunks that are not idle (e.g., completed, processed, running, etc.)
+                    logger.info(f"Chunk {chunk.id} ({chunk.chunk_name}) has status '{chunk.status}' (not idle), skipping")
+                    completed_chunks.append(chunk.chunk_name)
                 else:
+                    # Only process chunks with status = 'idle' or status = None/null
+                    logger.info(f"Chunk {chunk.id} ({chunk.chunk_name}) is IDLE or null status, will set caller")
                     valid_chunks.append(chunk)
             
             if not valid_chunks:
-                error_msg = f"No valid chunks with CID found. {len(invalid_chunks)} chunks missing CID."
-                logger.error(error_msg)
-                return False, error_msg, None
+                # Check if all chunks are not idle
+                if len(completed_chunks) > 0 and len(invalid_chunks) == 0:
+                    success_msg = f"All {len(completed_chunks)} chunks are not idle (already processed/running). No action needed."
+                    logger.info(success_msg)
+                    result_data = {
+                        'agent_id': agent_id,
+                        'chunks_updated': 0,
+                        'total_chunks': len(chunks),
+                        'skipped_chunks': 0,
+                        'completed_chunks': len(completed_chunks),
+                        'completed_chunk_names': completed_chunks,
+                        'message': success_msg
+                    }
+                    return True, None, result_data
+                else:
+                    error_msg = f"No valid chunks with CID found. {len(invalid_chunks)} chunks missing CID, {len(completed_chunks)} chunks already completed."
+                    logger.error(error_msg)
+                    return False, error_msg, None
             
             # 📊 Progress logging
             logger.info(f"⚡ Processing {len(valid_chunks)} chunks in parallel (max {MAX_CONCURRENT_REQUESTS} concurrent)...")
             if invalid_chunks:
                 logger.warning(f"⚠️  Skipping {len(invalid_chunks)} chunks without CID: {', '.join(invalid_chunks[:5])}{'...' if len(invalid_chunks) > 5 else ''}")
+            if completed_chunks:
+                logger.info(f"⚠️  Skipping {len(completed_chunks)} non-idle chunks: {', '.join(completed_chunks[:5])}{'...' if len(completed_chunks) > 5 else ''}")
             
             try:
                 # 🚀 Create all tasks for parallel execution
@@ -1054,12 +1081,17 @@ async def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str)
                     'agent_id': agent_id,
                     'chunks_updated': success_count,
                     'total_chunks': len(chunks),
-                    'skipped_chunks': len(invalid_chunks)
+                    'skipped_chunks': len(invalid_chunks),
+                    'completed_chunks': len(completed_chunks)
                 }
                 
                 if invalid_chunks:
                     logger.warning(f"⚠️  {len(invalid_chunks)} chunks were skipped (no CID)")
                     result_data['skipped_chunk_names'] = invalid_chunks
+                
+                if completed_chunks:
+                    logger.info(f"⚠️  {len(completed_chunks)} chunks were not idle (skipped)")
+                    result_data['non_idle_chunk_names'] = completed_chunks
                 
                 return True, None, result_data
                 
@@ -1075,6 +1107,13 @@ async def set_caller_service(db: DB_DEPENDENCY, campaign_id: int, phone_id: str)
             if not campaign.cid:
                 error_msg = f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
                 logger.error(error_msg)
+                return False, error_msg, None
+            
+            # Check if campaign is idle
+            logger.info(f"Checking single campaign {campaign_id} ({campaign.campaign_name}): status={repr(campaign.status)}")
+            if campaign.status and campaign.status.lower() != 'idle':
+                error_msg = f"Campaign {campaign_id} ({campaign.campaign_name}) has status '{campaign.status}' (not idle). Cannot set caller."
+                logger.info(error_msg)
                 return False, error_msg, None
         
         # Set caller in Millis.ai
