@@ -86,9 +86,5 @@ echo ""
 python3 -m uvicorn main:app \
     --host "$HOST" \
     --port "$PORT" \
-    --reload \
-    --timeout-keep-alive 300 \
-    --timeout-graceful-shutdown 120 \
-    --limit-concurrency 1000 \
-    --limit-max-requests 0
+    --reload
 
