@@ -14,6 +14,10 @@ import { PersistentFilters } from '@/components/PersistentFilters';
 import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle, FileText, Code, Braces, Sheet } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
 import '@/components/FilterSection.css';
+import { VerticalSidebar } from '@/components/VerticalSidebar';
+import { RocketIcon } from '@/components/icons/RocketIcon';
+import { FileStackIcon } from '@/components/icons/FileStackIcon';
+import { SquareActivityIcon } from '@/components/icons/SquareActivityIcon';
 
 interface DataLog {
   id?: number;
@@ -74,7 +78,7 @@ export default function Home() {
   const [ccdLimit, setCcdLimit] = useState<number>(50);
   const [showCSVPreview, setShowCSVPreview] = useState(false);
   const [ccdCurrentPage, setCcdCurrentPage] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<'data-management' | 'campaign-management' | 'reports' | 'disposition-tree'>('data-management');
+  const [activeTab, setActiveTab] = useState<'data-management' | 'campaign-management' | 'campaign-automation' | 'reports' | 'monitor' | 'disposition-tree'>('data-management');
   
   // View/Edit mode states for CCD modal
   const [ccdViewMode, setCcdViewMode] = useState<'view' | 'edit'>('view');
@@ -1007,9 +1011,14 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[var(--background)]">
-      <div className="container mx-auto px-4 py-6 max-w-[1920px]">
-        {/* Header */}
-        <div className="mb-6">
+      {/* Vertical Sidebar */}
+      <VerticalSidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      
+      {/* Main Content - with left padding to account for sidebar */}
+      <div className="ml-14 transition-all duration-300">
+        <div className="container mx-auto px-4 py-6 max-w-[1920px]">
+          {/* Header */}
+          <div className="mb-6">
           <div className="flex items-center justify-between flex-wrap mb-2">
             <div className="flex items-center gap-4 flex-wrap">
               <h1 className="text-3xl font-bold text-[var(--foreground)]">
@@ -1052,64 +1061,6 @@ export default function Home() {
           <p className="text-[var(--secondary)]">
             Filter and analyze campaign data with advanced controls
           </p>
-        </div>
-
-        {/* Tabs */}
-        <div className="mb-6 border-b border-[var(--card-border)]">
-          <div className="flex gap-1">
-            <button
-              onClick={() => setActiveTab('data-management')}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'data-management'
-                  ? 'border-[var(--primary)] text-[var(--primary)]'
-                  : 'border-transparent text-[var(--secondary)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4" />
-                Data Management
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('campaign-management')}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'campaign-management'
-                  ? 'border-[var(--primary)] text-[var(--primary)]'
-                  : 'border-transparent text-[var(--secondary)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-4 h-4" />
-                Campaign Management
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('reports')}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'reports'
-                  ? 'border-[var(--primary)] text-[var(--primary)]'
-                  : 'border-transparent text-[var(--secondary)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Wrench className="w-4 h-4" />
-                Reports
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('disposition-tree')}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'disposition-tree'
-                  ? 'border-[var(--primary)] text-[var(--primary)]'
-                  : 'border-transparent text-[var(--secondary)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Network className="w-4 h-4" />
-                Disposition Tree
-              </div>
-            </button>
-          </div>
         </div>
 
         {/* Tab Content */}
@@ -1598,18 +1549,54 @@ export default function Home() {
         {/* Campaign Management Tab */}
         <div className={activeTab === 'campaign-management' ? '' : 'hidden'}>
           <CampaignManagement selectedClientId={selectedClientId} />
+        </div>
+
+        {/* Campaign Automation Tab */}
+        <div className={activeTab === 'campaign-automation' ? '' : 'hidden'}>
+          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
+            <div className="text-center">
+              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-xl">
+                <RocketIcon size={48} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-bold text-[var(--foreground)] mb-3">
+                Campaign Automation
+              </h3>
+              <p className="text-[var(--secondary)] text-lg">
+                Autonomous campaign management powered by backend automation. Coming soon!
+              </p>
+            </div>
           </div>
+        </div>
 
         {/* Reports Tab */}
         <div className={activeTab === 'reports' ? '' : 'hidden'}>
           <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
             <div className="text-center">
-              <Wrench className="w-16 h-16 mx-auto mb-4 text-[var(--secondary)]" />
-              <h3 className="text-xl font-semibold text-[var(--foreground)] mb-2">
-                Under Maintenance
+              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-xl">
+                <FileStackIcon size={48} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-bold text-[var(--foreground)] mb-3">
+                Advanced Reports
               </h3>
-              <p className="text-[var(--secondary)]">
-                Reports section is currently under development. Please check back later.
+              <p className="text-[var(--secondary)] text-lg">
+                Comprehensive analytics and reporting dashboard. Coming soon!
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Monitor Tab */}
+        <div className={activeTab === 'monitor' ? '' : 'hidden'}>
+          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
+            <div className="text-center">
+              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-xl">
+                <SquareActivityIcon size={48} className="text-white" />
+              </div>
+              <h3 className="text-2xl font-bold text-[var(--foreground)] mb-3">
+                Real-time Monitoring
+              </h3>
+              <p className="text-[var(--secondary)] text-lg">
+                Monitor campaign performance and system health in real-time. Coming soon!
               </p>
             </div>
           </div>
@@ -2129,6 +2116,7 @@ export default function Home() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

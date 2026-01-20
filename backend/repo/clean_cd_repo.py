@@ -320,8 +320,9 @@ def get_records_not_in_campaigns(
             return s_nos
         
         # Query for records where campaign_id is NULL or NOT in the valid list
+        # Use .notin_() instead of ~.in_() for proper NULL handling
         query = db.query(model.s_no).filter(
-            (model.campaign_id.is_(None)) | (~model.campaign_id.in_(valid_campaign_ids))
+            (model.campaign_id.is_(None)) | (model.campaign_id.notin_(valid_campaign_ids))
         )
         records = query.all()
         s_nos = [r[0] for r in records]
