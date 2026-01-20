@@ -52,7 +52,7 @@ def get_connected_records_for_campaign(
         campaign_id: Campaign ID to filter by (MUST match)
         
     Returns:
-        List of connected records as dictionaries with s_no, contact_to, and campaign_id
+        List of connected records as dictionaries with s_no, contact_to, name, and campaign_id
     """
     try:
         # CRITICAL: Filter by campaign_id FIRST
@@ -61,7 +61,7 @@ def get_connected_records_for_campaign(
         query = filter_by_connected_status(query, con_status=True)
         records = query.all()
         
-        # Convert to dicts with s_no, contact_to, and campaign_id
+        # Convert to dicts with s_no, contact_to, name, and campaign_id
         result = []
         for record in records:
             record_campaign_id = getattr(record, 'campaign_id', None)
@@ -70,9 +70,14 @@ def get_connected_records_for_campaign(
                 logger.warning(f"WARNING: Record s_no={getattr(record, 's_no', None)} has campaign_id={record_campaign_id}, expected {campaign_id}. Skipping.")
                 continue
             
+            # Extract name from meta_data JSON field
+            meta_data = getattr(record, 'meta_data', None) or {}
+            name = meta_data.get('Name', None) if isinstance(meta_data, dict) else None
+            
             result.append({
                 's_no': getattr(record, 's_no', None),
                 'contact_to': getattr(record, 'contact_to', None),
+                'name': name,
                 'campaign_id': campaign_id  # Explicitly set to ensure consistency
             })
         
@@ -100,7 +105,7 @@ def get_disconnected_records_for_campaign(
         campaign_id: Campaign ID to filter by (MUST match)
         
     Returns:
-        List of disconnected records as dictionaries with s_no, contact_to, and campaign_id
+        List of disconnected records as dictionaries with s_no, contact_to, name, and campaign_id
     """
     try:
         # CRITICAL: Filter by campaign_id FIRST
@@ -109,7 +114,7 @@ def get_disconnected_records_for_campaign(
         query = filter_by_connected_status(query, con_status=False)
         records = query.all()
         
-        # Convert to dicts with s_no, contact_to, and campaign_id
+        # Convert to dicts with s_no, contact_to, name, and campaign_id
         result = []
         for record in records:
             record_campaign_id = getattr(record, 'campaign_id', None)
@@ -118,9 +123,14 @@ def get_disconnected_records_for_campaign(
                 logger.warning(f"WARNING: Record s_no={getattr(record, 's_no', None)} has campaign_id={record_campaign_id}, expected {campaign_id}. Skipping.")
                 continue
             
+            # Extract name from meta_data JSON field
+            meta_data = getattr(record, 'meta_data', None) or {}
+            name = meta_data.get('Name', None) if isinstance(meta_data, dict) else None
+            
             result.append({
                 's_no': getattr(record, 's_no', None),
                 'contact_to': getattr(record, 'contact_to', None),
+                'name': name,
                 'campaign_id': campaign_id  # Explicitly set to ensure consistency
             })
         
@@ -137,15 +147,17 @@ def find_records_to_delete(
     campaign_id: int
 ) -> List[int]:
     """
-    Find disconnected records that have matching contact_to with connected records
+    Find disconnected records that have matching contact_to AND name with connected records
     WITHIN THE SAME CAMPAIGN_ID.
     
-    IMPORTANT: Only deletes disconnected records that are duplicates of connected records
+    IMPORTANT: Uniqueness is determined by BOTH contact_to and name together.
+    This is because the same phone number can have different names in call records.
+    Only deletes disconnected records that are duplicates of connected records
     within the same campaign_id. Records from different campaigns are never matched.
     
     Args:
-        connected_records: List of connected records with contact_to and campaign_id
-        disconnected_records: List of disconnected records with contact_to, s_no, and campaign_id
+        connected_records: List of connected records with contact_to, name, and campaign_id
+        disconnected_records: List of disconnected records with contact_to, name, s_no, and campaign_id
         campaign_id: Campaign ID to validate against (for safety)
         
     Returns:
@@ -158,20 +170,22 @@ def find_records_to_delete(
             logger.warning(f"WARNING: Connected record has campaign_id={record_campaign_id}, expected {campaign_id}. Skipping this record.")
             continue
     
-    # Create a set of contact_to values from connected records (same campaign_id only)
-    connected_contact_tos: Set[str] = set()
+    # Create a set of (contact_to, name) tuples from connected records (same campaign_id only)
+    # This ensures uniqueness is based on BOTH contact_to AND name
+    connected_pairs: Set[Tuple[str, str]] = set()
     for record in connected_records:
         record_campaign_id = record.get('campaign_id')
         if record_campaign_id != campaign_id:
             continue  # Skip records from different campaigns
         contact_to = record.get('contact_to')
-        if contact_to is not None:
-            # Convert to string for comparison
-            connected_contact_tos.add(str(contact_to))
+        name = record.get('name')
+        if contact_to is not None and name is not None:
+            # Convert to strings for comparison and create tuple
+            connected_pairs.add((str(contact_to), str(name)))
     
-    logger.info(f"Campaign {campaign_id}: Connected records have {len(connected_contact_tos)} unique contact_to values")
+    logger.info(f"Campaign {campaign_id}: Connected records have {len(connected_pairs)} unique (contact_to, name) pairs")
     
-    # Find disconnected records with matching contact_to (same campaign_id only)
+    # Find disconnected records with matching (contact_to, name) pair (same campaign_id only)
     s_nos_to_delete = []
     for record in disconnected_records:
         record_campaign_id = record.get('campaign_id')
@@ -181,17 +195,21 @@ def find_records_to_delete(
             continue
         
         contact_to = record.get('contact_to')
+        name = record.get('name')
         s_no = record.get('s_no')
         
-        if contact_to is not None and s_no is not None:
-            if str(contact_to) in connected_contact_tos:
+        if contact_to is not None and name is not None and s_no is not None:
+            pair = (str(contact_to), str(name))
+            if pair in connected_pairs:
                 s_nos_to_delete.append(s_no)
-                logger.info(f"Campaign {campaign_id}: Found duplicate - disconnected record s_no={s_no} matches connected record with contact_to={contact_to}")
+                logger.info(f"Campaign {campaign_id}: Found duplicate - disconnected record s_no={s_no} matches connected record with contact_to={contact_to}, name={name}")
             else:
-                logger.debug(f"Campaign {campaign_id}: Disconnected record s_no={s_no} with contact_to={contact_to} does NOT match any connected record")
+                logger.debug(f"Campaign {campaign_id}: Disconnected record s_no={s_no} with contact_to={contact_to}, name={name} does NOT match any connected record")
         else:
             if contact_to is None:
                 logger.debug(f"Campaign {campaign_id}: Disconnected record s_no={s_no} has no contact_to, skipping")
+            if name is None:
+                logger.debug(f"Campaign {campaign_id}: Disconnected record s_no={s_no} has no name, skipping")
             if s_no is None:
                 logger.warning(f"Campaign {campaign_id}: Disconnected record has no s_no, cannot delete")
     
