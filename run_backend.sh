@@ -56,13 +56,13 @@ fi
 
 # Get host and port from .env or use defaults
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8000}"
+PORT="${PORT:-8012}"
 
 # Load .env file if it exists
 if [ -f ".env" ]; then
     export $(cat .env | grep -v '^#' | xargs)
     HOST="${HOST:-0.0.0.0}"
-    PORT="${PORT:-8000}"
+    PORT="${PORT:-8012}"
 fi
 
 echo -e "${GREEN}[3/3]${NC} Starting FastAPI server..."
@@ -78,6 +78,17 @@ echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""
 
-# Start the server
-python3 -m uvicorn main:app --host "$HOST" --port "$PORT" --reload
+# Start the server with increased limits for large file uploads
+# --timeout-keep-alive: Keep-alive timeout (default 5s, increased to 300s)
+# --timeout-graceful-shutdown: Graceful shutdown timeout
+# --limit-concurrency: Max concurrent connections (default 100, increased to 1000)
+# --limit-max-requests: Max requests before restarting worker (0 = unlimited with --reload)
+python3 -m uvicorn main:app \
+    --host "$HOST" \
+    --port "$PORT" \
+    --reload \
+    --timeout-keep-alive 300 \
+    --timeout-graceful-shutdown 120 \
+    --limit-concurrency 1000 \
+    --limit-max-requests 0
 

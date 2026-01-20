@@ -22,7 +22,7 @@ from router.table_config import router as table_config_router
 # This must happen before any queries are executed
 from content_size_limit_asgi import ContentSizeLimitMiddleware
 
-MAX_CONTENT_SIZE = 1024 * 1024 * 50 # 50MB limit
+MAX_CONTENT_SIZE = 1024 * 1024 * 500 # 500MB limit
 
 app = FastAPI()
 security = HTTPBearer(auto_error=False)
