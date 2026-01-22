@@ -26,7 +26,8 @@ def get_current_time():
 async def ensure_disposition_job(
     db: DB_DEPENDENCY,
     client_id: int,
-    campaign_id: int
+    campaign_id: int,
+    priority: int = 0
 ) -> DispositionJob:
     """
     Ensure a disposition job exists for the given client_id and campaign_id.
@@ -36,6 +37,7 @@ async def ensure_disposition_job(
         db: Database session
         client_id: Client ID
         campaign_id: Campaign ID
+        priority: Priority of the job (default: 0)
         
     Returns:
         DispositionJob job (existing or newly created)
@@ -46,9 +48,10 @@ async def ensure_disposition_job(
             DispositionJob.client_id == client_id,
             DispositionJob.campaign_id == campaign_id
         ).first()
+            
         
         if job:
-            logger.info(f"Found existing disposition job: client_id={client_id}, campaign_id={campaign_id}, status={job.status}")
+            logger.info(f"Found existing disposition job: client_id={client_id}, campaign_id={campaign_id}, status={job.status}, priority={job.priority}")
             return job
         
         # Create new job if not exists
@@ -57,6 +60,7 @@ async def ensure_disposition_job(
             campaign_id=campaign_id,
             cur_idx=0,
             status='queue',
+            priority=priority,
             processed_records=0,
             retry_count=0
         )
@@ -65,7 +69,7 @@ async def ensure_disposition_job(
         db.commit()
         db.refresh(new_job)
         
-        logger.info(f"Created new disposition job: client_id={client_id}, campaign_id={campaign_id}, job_id={new_job.id}")
+        logger.info(f"Created new disposition job: client_id={client_id}, campaign_id={campaign_id}, job_id={new_job.id}, priority={priority}")
         return new_job
         
     except Exception as e:
@@ -265,6 +269,8 @@ async def set_disposition_status(
     """
     Set the status of a disposition job (simplified version).
     
+    PROTECTION: Completed jobs cannot be changed to any other status.
+    
     Args:
         db: Database session
         client_id: Client ID
@@ -282,6 +288,11 @@ async def set_disposition_status(
         
         if not job:
             logger.error(f"No job found: client_id={client_id}, campaign_id={campaign_id}")
+            return False
+        
+        # PROTECTION: Never change completed jobs
+        if job.status == 'completed':
+            logger.warning(f"Cannot change status of completed job: client_id={client_id}, campaign_id={campaign_id}, current_status=completed, attempted_status={status}")
             return False
         
         job.status = status
@@ -307,6 +318,8 @@ async def update_disposition_job_status(
     """
     Update the status of a disposition job.
     
+    PROTECTION: Completed jobs cannot be changed to any other status.
+    
     Args:
         db: Database session
         client_id: Client ID
@@ -325,6 +338,11 @@ async def update_disposition_job_status(
         
         if not job:
             logger.error(f"No job found to update: client_id={client_id}, campaign_id={campaign_id}")
+            return False
+        
+        # PROTECTION: Never change completed jobs
+        if job.status == 'completed':
+            logger.warning(f"Cannot change status of completed job: client_id={client_id}, campaign_id={campaign_id}, current_status=completed, attempted_status={status}")
             return False
         
         job.status = status
@@ -443,40 +461,94 @@ async def heartbeat(
 
 async def is_disposition_job_alive(
     db: DB_DEPENDENCY,
-    client_id: int,
-    campaign_id: int
+    client_id: int
 ) -> bool:
     """
-    Check if a disposition job is still alive based on heartbeat timestamp.
-    A job is considered alive if its last heartbeat was within ALIVE_PERIOD seconds.
+    Check if client has an alive disposition job based on heartbeat.
+    
+    Logic:
+    - If 0 running jobs: Return False (client is sleeping/idle)
+    - If 1 running job: Check its heartbeat liveness
+    - If 2+ running jobs: Check first job's liveness, set others to 'queue'
     
     Args:
         db: Database session
         client_id: Client ID
-        campaign_id: Campaign ID
         
     Returns:
-        True if job is alive (heartbeat within ALIVE_PERIOD), False otherwise
+        True if client has an alive job, False otherwise
     """
     try:
-        job = db.query(DispositionJob).filter(
+        # Fetch all running jobs for the client, sorted by created_at ascending
+        running_jobs = db.query(DispositionJob).filter(
             DispositionJob.client_id == client_id,
-            DispositionJob.campaign_id == campaign_id
-        ).first()
+            DispositionJob.status == 'running'
+        ).order_by(DispositionJob.created_at.asc()).all()
         
-        if not job:
-            logger.warning(f"No job found for client_id={client_id}, campaign_id={campaign_id}")
+        total_records = len(running_jobs)
+        
+        logger.info(f"Client {client_id}: Found {total_records} running job(s)")
+        
+        # Case 1: No running jobs - client is sleeping
+        if total_records == 0:
+            logger.info(f"Client {client_id}: No running jobs - sleeping/idle")
             return False
         
-        if not job.heartbeat_at:
-            logger.info(f"Job has no heartbeat: client_id={client_id}, campaign_id={campaign_id}")
+        # Case 2: Exactly 1 running job - check its liveness
+        if total_records == 1:
+            job = running_jobs[0]
+            
+            if not job.heartbeat_at:
+                logger.warning(f"Client {client_id}, campaign {job.campaign_id}: No heartbeat - job is DEAD")
+                return False
+            
+            # Calculate time difference
+            current_time = get_current_time()
+            
+            # Make heartbeat_at timezone-aware if it isn't
+            heartbeat_time = job.heartbeat_at
+            if heartbeat_time.tzinfo is None:
+                heartbeat_time = ASIA_KOLKATA.localize(heartbeat_time)
+            
+            time_diff = current_time - heartbeat_time
+            time_diff_seconds = time_diff.total_seconds()
+            
+            is_alive = time_diff_seconds < ALIVE_PERIOD
+            
+            if is_alive:
+                logger.info(f"Client {client_id}, campaign {job.campaign_id}: Job is ALIVE - heartbeat {time_diff_seconds:.1f}s ago (threshold={ALIVE_PERIOD}s)")
+            else:
+                logger.warning(f"Client {client_id}, campaign {job.campaign_id}: Job is DEAD - heartbeat {time_diff_seconds:.1f}s ago (threshold={ALIVE_PERIOD}s)")
+            
+            return is_alive
+        
+        # Case 3: 2+ running jobs - check first, reset others to queue
+        logger.warning(f"Client {client_id}: Multiple running jobs ({total_records}) detected! Checking first, resetting others to queue")
+        
+        first_job = running_jobs[0]
+        other_jobs = running_jobs[1:]
+        
+        # Reset other jobs to queue (but skip completed ones)
+        for job in other_jobs:
+            # Skip if already completed - leave completed jobs as is
+            if job.status == 'completed':
+                logger.info(f"Client {client_id}, campaign {job.campaign_id}: Skipping (already completed)")
+                continue
+            
+            job.status = 'queue'
+            job.updated_at = get_current_time()
+            logger.info(f"Client {client_id}, campaign {job.campaign_id}: Reset to queue (extra running job)")
+        
+        db.commit()
+        
+        # Check liveness of first job
+        if not first_job.heartbeat_at:
+            logger.warning(f"Client {client_id}, campaign {first_job.campaign_id}: No heartbeat - job is DEAD")
             return False
         
-        # Calculate time difference
         current_time = get_current_time()
         
-        # Make heartbeat_at timezone-aware if it isn't
-        heartbeat_time = job.heartbeat_at
+        heartbeat_time = first_job.heartbeat_at
         if heartbeat_time.tzinfo is None:
             heartbeat_time = ASIA_KOLKATA.localize(heartbeat_time)
         
@@ -486,13 +558,14 @@ async def is_disposition_job_alive(
         is_alive = time_diff_seconds < ALIVE_PERIOD
         
         if is_alive:
-            logger.info(f"Job is ALIVE: client_id={client_id}, campaign_id={campaign_id}, last_heartbeat={time_diff_seconds:.1f}s ago (threshold={ALIVE_PERIOD}s)")
+            logger.info(f"Client {client_id}, campaign {first_job.campaign_id}: First job is ALIVE - heartbeat {time_diff_seconds:.1f}s ago")
         else:
-            logger.warning(f"Job is DEAD: client_id={client_id}, campaign_id={campaign_id}, last_heartbeat={time_diff_seconds:.1f}s ago (threshold={ALIVE_PERIOD}s)")
+            logger.warning(f"Client {client_id}, campaign {first_job.campaign_id}: First job is DEAD - heartbeat {time_diff_seconds:.1f}s ago")
         
         return is_alive
         
     except Exception as e:
+        db.rollback()
         logger.error(f"Error checking job alive status: {e}")
         raise
 

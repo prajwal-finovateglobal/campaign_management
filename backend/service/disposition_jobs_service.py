@@ -18,6 +18,7 @@ from repo.disposition_jobs_repo import (
 )
 from typing import Optional, Tuple, Dict, Any
 import loguru
+import time
 
 logger = loguru.logger.bind(service="disposition_jobs")
 
@@ -25,7 +26,8 @@ logger = loguru.logger.bind(service="disposition_jobs")
 async def ensure_job_exists(
     db: DB_DEPENDENCY,
     client_id: int,
-    campaign_id: int
+    campaign_id: int,
+    priority: int = 0
 ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
     Ensure a disposition job exists for the campaign.
@@ -34,18 +36,20 @@ async def ensure_job_exists(
         db: Database session
         client_id: Client ID
         campaign_id: Campaign ID
+        priority: Priority of the job (default: 0)
         
     Returns:
         Tuple of (success, message, job_data)
     """
     try:
-        job = await ensure_disposition_job(db, client_id, campaign_id)
+        job = await ensure_disposition_job(db, client_id, campaign_id, priority)
         
         job_data = {
             'id': job.id,
             'client_id': job.client_id,
             'campaign_id': job.campaign_id,
             'status': job.status,
+            'priority': job.priority,
             'cur_idx': job.cur_idx,
             'processed_records': job.processed_records,
             'total_records': job.total_records
@@ -277,30 +281,33 @@ async def send_heartbeat(
 
 async def check_job_alive(
     db: DB_DEPENDENCY,
-    client_id: int,
-    campaign_id: int
+    client_id: int
 ) -> Tuple[bool, str, bool]:
     """
-    Check if a disposition job is still alive based on heartbeat.
+    Check if client has an alive disposition job based on heartbeat.
+    
+    Handles multiple scenarios:
+    - 0 running jobs: Returns False (client is idle/sleeping)
+    - 1 running job: Checks its heartbeat liveness
+    - 2+ running jobs: Checks first job, resets others to queue
     
     Args:
         db: Database session
         client_id: Client ID
-        campaign_id: Campaign ID
         
     Returns:
         Tuple of (success, message, is_alive)
         - success: Whether the check was successful
         - message: Status message
-        - is_alive: True if job is alive, False if dead or not found
+        - is_alive: True if client has alive job, False otherwise
     """
     try:
-        is_alive = await is_disposition_job_alive(db, client_id, campaign_id)
+        is_alive = await is_disposition_job_alive(db, client_id)
         
         if is_alive:
-            return (True, "Job is alive", True)
+            return (True, "Client has an alive job", True)
         else:
-            return (True, "Job is dead or has no heartbeat", False)
+            return (True, "No alive jobs (sleeping or dead)", False)
         
     except Exception as e:
         logger.error(f"Error checking job alive: {e}")
@@ -336,8 +343,6 @@ async def check_if_busy(
     except Exception as e:
         logger.error(f"Error checking if client is busy: {e}")
         return (False, f"Error: {str(e)}", False)
-
-
 async def set_job_status(
     db: DB_DEPENDENCY,
     client_id: int,
@@ -367,3 +372,90 @@ async def set_job_status(
     except Exception as e:
         logger.error(f"Error setting status: {e}")
         return (False, f"Error: {str(e)}", None)
+
+
+def process_disposition(
+    db: DB_DEPENDENCY,
+    client_id: int,
+    campaign_id: int,
+    table_name: str
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    Process disposition for a campaign (SYNC function - process completion is critical).
+    
+    This is a synchronous function to ensure the entire process completes.
+    Currently implements a skeleton loop with cur_idx updates.
+    Later, the time.sleep(1) will be replaced with actual disposition processing logic.
+    
+    Args:
+        db: Database session
+        client_id: Client ID
+        campaign_id: Campaign ID
+        table_name: Datalog table name
+        
+    Returns:
+        Tuple of (success, message, result_data)
+        - success: Whether processing completed successfully
+        - message: Status message
+        - result_data: Dictionary with processing results
+    """
+    try:
+        logger.info(f"Starting disposition processing: client_id={client_id}, campaign_id={campaign_id}, table={table_name}")
+        
+        # Process loop - 10 iterations
+        for i in range(10):
+            logger.info(f"Processing iteration {i}: Updating cur_idx to {i}")
+            
+            # Update cur_idx in cms_disposition_jobs
+            # Using the existing update_disposition_job_progress function
+            # We'll call the repo function directly since this is sync
+            from repo.disposition_jobs_repo import DispositionJob
+            
+            job = db.query(DispositionJob).filter(
+                DispositionJob.client_id == client_id,
+                DispositionJob.campaign_id == campaign_id
+            ).first()
+            
+            if job:
+                job.cur_idx = i
+                db.commit()
+                logger.debug(f"Updated cur_idx to {i} for campaign {campaign_id}")
+            else:
+                logger.error(f"Job not found: client_id={client_id}, campaign_id={campaign_id}")
+                return (False, "Job not found", None)
+            
+            # Placeholder sleep - will be replaced with actual disposition logic later
+            time.sleep(1)
+        
+        # After 10 iterations, set status to completed
+        logger.info(f"All iterations complete. Setting status to 'completed'")
+        
+        job = db.query(DispositionJob).filter(
+            DispositionJob.client_id == client_id,
+            DispositionJob.campaign_id == campaign_id
+        ).first()
+        
+        if job:
+            job.status = 'completed'
+            job.cur_idx = 10  # Final cursor position
+            db.commit()
+            logger.info(f"Disposition processing completed: client_id={client_id}, campaign_id={campaign_id}")
+        
+        # Return result
+        result = {
+            "client_id": client_id,
+            "campaign_id": campaign_id,
+            "table_name": table_name,
+            "status": "completed",
+            "total_iterations": 10,
+            "final_cur_idx": 10
+        }
+        
+        return (True, "Disposition processing completed successfully", result)
+        
+    except Exception as e:
+        logger.error(f"Error in disposition processing: {e}")
+        db.rollback()
+        return (False, f"Error: {str(e)}", None)
+
+
