@@ -9,6 +9,7 @@ from repo.disposition_jobs_repo import (
     fetch_cursor,
     fetch_max_cursor,
     fetch_next_disposition_job,
+    set_disposition_status,
     update_disposition_job_status,
     update_disposition_job_progress,
     heartbeat,
@@ -21,7 +22,7 @@ import loguru
 logger = loguru.logger.bind(service="disposition_jobs")
 
 
-def ensure_job_exists(
+async def ensure_job_exists(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -38,7 +39,7 @@ def ensure_job_exists(
         Tuple of (success, message, job_data)
     """
     try:
-        job = ensure_disposition_job(db, client_id, campaign_id)
+        job = await ensure_disposition_job(db, client_id, campaign_id)
         
         job_data = {
             'id': job.id,
@@ -57,7 +58,7 @@ def ensure_job_exists(
         return (False, f"Error: {str(e)}", None)
 
 
-def pause_other_campaigns(
+async def pause_other_campaigns(
     db: DB_DEPENDENCY,
     client_id: int,
     active_campaign_id: int
@@ -75,7 +76,7 @@ def pause_other_campaigns(
         Tuple of (success, message, count_reset)
     """
     try:
-        count = reset_other_campaigns_to_queue(db, client_id, active_campaign_id)
+        count = await reset_other_campaigns_to_queue(db, client_id, active_campaign_id)
         
         if count > 0:
             message = f"Reset {count} campaign(s) to queue status"
@@ -89,7 +90,7 @@ def pause_other_campaigns(
         return (False, f"Error: {str(e)}", 0)
 
 
-def get_current_cursor(
+async def get_current_cursor(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -106,7 +107,7 @@ def get_current_cursor(
         Tuple of (success, message, cur_idx)
     """
     try:
-        cur_idx = fetch_cursor(db, client_id, campaign_id)
+        cur_idx = await fetch_cursor(db, client_id, campaign_id)
         
         if cur_idx is None:
             return (False, "Job not found", None)
@@ -118,7 +119,7 @@ def get_current_cursor(
         return (False, f"Error: {str(e)}", None)
 
 
-def get_max_cursor(
+async def get_max_cursor(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int,
@@ -137,7 +138,7 @@ def get_max_cursor(
         Tuple of (success, message, max_cursor)
     """
     try:
-        max_cursor = fetch_max_cursor(db, client_id, campaign_id, table_name)
+        max_cursor = await fetch_max_cursor(db, client_id, campaign_id, table_name)
         
         if max_cursor is None:
             return (True, "No records found in table", 0)
@@ -149,7 +150,7 @@ def get_max_cursor(
         return (False, f"Error: {str(e)}", None)
 
 
-def get_next_job(
+async def get_next_job(
     db: DB_DEPENDENCY,
     client_id: int
 ) -> Tuple[bool, str, Optional[int]]:
@@ -164,7 +165,7 @@ def get_next_job(
         Tuple of (success, message, campaign_id)
     """
     try:
-        campaign_id = fetch_next_disposition_job(db, client_id)
+        campaign_id = await fetch_next_disposition_job(db, client_id)
         
         if campaign_id is None:
             return (True, "No queued jobs available", None)
@@ -176,7 +177,7 @@ def get_next_job(
         return (False, f"Error: {str(e)}", None)
 
 
-def update_job_status(
+async def update_job_status(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int,
@@ -195,7 +196,7 @@ def update_job_status(
         Tuple of (success, message)
     """
     try:
-        success = update_disposition_job_status(db, client_id, campaign_id, status)
+        success = await update_disposition_job_status(db, client_id, campaign_id, status)
         
         if success:
             return (True, f"Status updated to '{status}'")
@@ -207,7 +208,7 @@ def update_job_status(
         return (False, f"Error: {str(e)}")
 
 
-def update_job_progress(
+async def update_job_progress(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int,
@@ -230,7 +231,7 @@ def update_job_progress(
         Tuple of (success, message)
     """
     try:
-        success = update_disposition_job_progress(
+        success = await update_disposition_job_progress(
             db, client_id, campaign_id, cur_idx, processed_records, total_records
         )
         
@@ -244,7 +245,7 @@ def update_job_progress(
         return (False, f"Error: {str(e)}")
 
 
-def send_heartbeat(
+async def send_heartbeat(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -262,7 +263,7 @@ def send_heartbeat(
         Tuple of (success, message)
     """
     try:
-        success = heartbeat(db, client_id, campaign_id)
+        success = await heartbeat(db, client_id, campaign_id)
         
         if success:
             return (True, "Heartbeat updated")
@@ -274,7 +275,7 @@ def send_heartbeat(
         return (False, f"Error: {str(e)}")
 
 
-def check_job_alive(
+async def check_job_alive(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -294,7 +295,7 @@ def check_job_alive(
         - is_alive: True if job is alive, False if dead or not found
     """
     try:
-        is_alive = is_disposition_job_alive(db, client_id, campaign_id)
+        is_alive = await is_disposition_job_alive(db, client_id, campaign_id)
         
         if is_alive:
             return (True, "Job is alive", True)
@@ -306,7 +307,7 @@ def check_job_alive(
         return (False, f"Error: {str(e)}", False)
 
 
-def check_if_busy(
+async def check_if_busy(
     db: DB_DEPENDENCY,
     client_id: int
 ) -> Tuple[bool, str, bool]:
@@ -325,7 +326,7 @@ def check_if_busy(
         - is_busy: True if client has a running job, False otherwise
     """
     try:
-        is_busy = is_disposition_job_busy(db, client_id)
+        is_busy = await is_disposition_job_busy(db, client_id)
         
         if is_busy:
             return (True, "Client has a running disposition job", is_busy)
@@ -335,3 +336,34 @@ def check_if_busy(
     except Exception as e:
         logger.error(f"Error checking if client is busy: {e}")
         return (False, f"Error: {str(e)}", False)
+
+
+async def set_job_status(
+    db: DB_DEPENDENCY,
+    client_id: int,
+    campaign_id: int,
+    status: str
+) -> Tuple[bool, str, None]:
+    """
+    Set the status of a disposition job (simplified version).
+    
+    Args:
+        db: Database session
+        client_id: Client ID
+        campaign_id: Campaign ID
+        status: New status ('queue', 'running', 'completed', 'failed')
+        
+    Returns:
+        Tuple of (success, message, None)
+    """
+    try:
+        success = await set_disposition_status(db, client_id, campaign_id, status)
+        
+        if success:
+            return (True, f"Status set to '{status}' successfully", None)
+        else:
+            return (False, "Failed to set status - job not found", None)
+            
+    except Exception as e:
+        logger.error(f"Error setting status: {e}")
+        return (False, f"Error: {str(e)}", None)

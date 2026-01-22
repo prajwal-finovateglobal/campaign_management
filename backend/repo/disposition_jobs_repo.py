@@ -23,7 +23,7 @@ def get_current_time():
     return datetime.now(ASIA_KOLKATA)
 
 
-def ensure_disposition_job(
+async def ensure_disposition_job(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -74,7 +74,7 @@ def ensure_disposition_job(
         raise
 
 
-def reset_other_campaigns_to_queue(
+async def reset_other_campaigns_to_queue(
     db: DB_DEPENDENCY,
     client_id: int,
     active_campaign_id: int
@@ -113,7 +113,7 @@ def reset_other_campaigns_to_queue(
         raise
 
 
-def fetch_cursor(
+async def fetch_cursor(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -147,7 +147,7 @@ def fetch_cursor(
         raise
 
 
-def fetch_max_cursor(
+async def fetch_max_cursor(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int,
@@ -186,7 +186,7 @@ def fetch_max_cursor(
         raise
 
 
-def fetch_next_disposition_job(
+async def fetch_next_disposition_job(
     db: DB_DEPENDENCY,
     client_id: int
 ) -> Optional[int]:
@@ -256,7 +256,48 @@ def fetch_next_disposition_job(
         raise
 
 
-def update_disposition_job_status(
+async def set_disposition_status(
+    db: DB_DEPENDENCY,
+    client_id: int,
+    campaign_id: int,
+    status: str
+) -> bool:
+    """
+    Set the status of a disposition job (simplified version).
+    
+    Args:
+        db: Database session
+        client_id: Client ID
+        campaign_id: Campaign ID
+        status: New status ('queue', 'running', 'completed', 'failed')
+        
+    Returns:
+        True if update successful, False otherwise
+    """
+    try:
+        job = db.query(DispositionJob).filter(
+            DispositionJob.client_id == client_id,
+            DispositionJob.campaign_id == campaign_id
+        ).first()
+        
+        if not job:
+            logger.error(f"No job found: client_id={client_id}, campaign_id={campaign_id}")
+            return False
+        
+        job.status = status
+        job.updated_at = get_current_time()
+        
+        db.commit()
+        logger.info(f"Status updated: client_id={client_id}, campaign_id={campaign_id}, status={status}")
+        return True
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error setting disposition status: {e}")
+        raise
+
+
+async def update_disposition_job_status(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int,
@@ -310,7 +351,7 @@ def update_disposition_job_status(
         raise
 
 
-def update_disposition_job_progress(
+async def update_disposition_job_progress(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int,
@@ -361,7 +402,7 @@ def update_disposition_job_progress(
         raise
 
 
-def heartbeat(
+async def heartbeat(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -400,7 +441,7 @@ def heartbeat(
         raise
 
 
-def is_disposition_job_alive(
+async def is_disposition_job_alive(
     db: DB_DEPENDENCY,
     client_id: int,
     campaign_id: int
@@ -456,7 +497,7 @@ def is_disposition_job_alive(
         raise
 
 
-def is_disposition_job_busy(
+async def is_disposition_job_busy(
     db: DB_DEPENDENCY,
     client_id: int
 ) -> bool:
