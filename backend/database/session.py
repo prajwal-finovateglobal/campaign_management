@@ -16,7 +16,7 @@ load_dotenv(dotenv_path=env_path)
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from typing import Annotated, Generator
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine, MetaData, event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, declarative_base
 from Core.config import DB_URL
@@ -24,7 +24,15 @@ from Core.logging_config import logger  # Use centralized logging
 
 Base = declarative_base()
 
-engine = create_engine(DB_URL, echo=False)
+# Set timezone to Asia/Kolkata for all connections
+engine = create_engine(
+    DB_URL, 
+    echo=False,
+    connect_args={
+        "options": "-c timezone=Asia/Kolkata"
+    }
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

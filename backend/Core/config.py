@@ -44,6 +44,9 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING,
 LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "true").lower() in ("true", "1", "yes")
 LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "logs/app.log")
 
+# Campaign Automation Configuration
+ALIVE_PERIOD: int = int(os.getenv("ALIVE_PERIOD", "300"))  # Time in seconds to consider a job alive (default: 5 minutes)
+
 
 class Settings(BaseSettings):
     LOG_LEVEL: str = LOG_LEVEL
