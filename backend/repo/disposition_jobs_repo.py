@@ -23,6 +23,50 @@ def get_current_time():
     return datetime.now(ASIA_KOLKATA)
 
 
+async def get_disposition_priorities(
+    db: DB_DEPENDENCY,
+    client_id: int
+) -> list[int]:
+    """
+    Get list of available disposition priorities for a client.
+    Returns all existing priorities (except 0) + (max_priority + 1).
+    
+    Args:
+        db: Database session
+        client_id: Client ID
+        
+    Returns:
+        List of available priorities
+    """
+    try:
+        # Fetch all distinct priorities for this client, excluding 0
+        priorities = db.query(DispositionJob.priority).filter(
+            DispositionJob.client_id == client_id,
+            DispositionJob.priority != 0
+        ).distinct().all()
+        
+        # Extract priority values
+        priority_list = [p.priority for p in priorities]
+        
+        # Calculate max + 1
+        if priority_list:
+            max_priority = max(priority_list)
+            priority_list.append(max_priority + 1)
+        else:
+            # If no priorities exist (all are 0), start with 1
+            priority_list = [1]
+        
+        # Sort the list
+        priority_list.sort()
+        
+        logger.info(f"Fetched disposition priorities for client_id={client_id}: {priority_list}")
+        return priority_list
+        
+    except Exception as e:
+        logger.error(f"Error fetching disposition priorities: {e}")
+        raise
+
+
 async def ensure_disposition_job(
     db: DB_DEPENDENCY,
     client_id: int,

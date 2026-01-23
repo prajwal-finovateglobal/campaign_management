@@ -14,13 +14,38 @@ from repo.disposition_jobs_repo import (
     update_disposition_job_progress,
     heartbeat,
     is_disposition_job_alive,
-    is_disposition_job_busy
+    is_disposition_job_busy,
+    get_disposition_priorities
 )
 from typing import Optional, Tuple, Dict, Any
 import loguru
 import time
 
 logger = loguru.logger.bind(service="disposition_jobs")
+
+
+async def disposition_priority(
+    db: DB_DEPENDENCY,
+    client_id: int
+) -> Tuple[bool, str, Optional[list[int]]]:
+    """
+    Get list of available disposition priorities for a client.
+    Returns all existing priorities (except 0) + (max_priority + 1).
+    
+    Args:
+        db: Database session
+        client_id: Client ID
+        
+    Returns:
+        Tuple of (success, message, priority_list)
+    """
+    try:
+        priority_list = await get_disposition_priorities(db, client_id)
+        return (True, f"Found {len(priority_list)} available priorities", priority_list)
+        
+    except Exception as e:
+        logger.error(f"Error getting disposition priorities: {e}")
+        return (False, f"Error: {str(e)}", None)
 
 
 async def ensure_job_exists(
