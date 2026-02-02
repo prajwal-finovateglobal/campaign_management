@@ -87,19 +87,19 @@ async def ensure_job_exists(
         return (False, f"Error: {str(e)}", None)
 
 
-async def pause_other_campaigns(
+async def pause_other_disposition_jobs(
     db: DB_DEPENDENCY,
     client_id: int,
     active_campaign_id: int
 ) -> Tuple[bool, str, int]:
     """
-    Reset all other campaigns to queue status (pausing them).
-    Only one campaign can run at a time per client.
+    Reset all other disposition jobs to queue status (pausing them).
+    Only one disposition job can run at a time per client.
     
     Args:
         db: Database session
         client_id: Client ID
-        active_campaign_id: Currently active campaign ID
+        active_campaign_id: Currently active disposition job ID
         
     Returns:
         Tuple of (success, message, count_reset)
@@ -108,14 +108,14 @@ async def pause_other_campaigns(
         count = await reset_other_campaigns_to_queue(db, client_id, active_campaign_id)
         
         if count > 0:
-            message = f"Reset {count} campaign(s) to queue status"
+            message = f"Reset {count} disposition job(s) to queue status"
         else:
-            message = "No other campaigns to reset"
+            message = "No other disposition jobs to reset"
         
         return (True, message, count)
         
     except Exception as e:
-        logger.error(f"Error pausing other campaigns: {e}")
+        logger.error(f"Error pausing other disposition jobs: {e}")
         return (False, f"Error: {str(e)}", 0)
 
 
@@ -125,7 +125,7 @@ async def get_current_cursor(
     campaign_id: int
 ) -> Tuple[bool, str, Optional[int]]:
     """
-    Get the current cursor position for a disposition job.
+    Get the current cursor position for a disposition job by campaign_id from cms_disposition_jobs table.
     
     Args:
         db: Database session

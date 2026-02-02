@@ -11,6 +11,8 @@ import { CSVPreviewModal } from '@/components/CSVPreviewModal';
 import { CampaignManagement } from '@/components/CampaignManagement';
 import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
+import { CampaignAutomation } from '@/components/CampaignAutomation';
+import { CampaignMonitor } from '@/components/CampaignMonitor';
 import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle, FileText, Code, Braces, Sheet } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
 import '@/components/FilterSection.css';
@@ -1553,19 +1555,7 @@ export default function Home() {
 
         {/* Campaign Automation Tab */}
         <div className={activeTab === 'campaign-automation' ? '' : 'hidden'}>
-          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
-            <div className="text-center">
-              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-xl">
-                <RocketIcon size={48} className="text-white" />
-              </div>
-              <h3 className="text-2xl font-bold text-[var(--foreground)] mb-3">
-                Campaign Automation
-              </h3>
-              <p className="text-[var(--secondary)] text-lg">
-                Autonomous campaign management powered by backend automation. Coming soon!
-              </p>
-            </div>
-          </div>
+          <CampaignAutomation />
         </div>
 
         {/* Reports Tab */}
@@ -1587,19 +1577,7 @@ export default function Home() {
 
         {/* Monitor Tab */}
         <div className={activeTab === 'monitor' ? '' : 'hidden'}>
-          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
-            <div className="text-center">
-              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-xl">
-                <SquareActivityIcon size={48} className="text-white" />
-              </div>
-              <h3 className="text-2xl font-bold text-[var(--foreground)] mb-3">
-                Real-time Monitoring
-              </h3>
-              <p className="text-[var(--secondary)] text-lg">
-                Monitor campaign performance and system health in real-time. Coming soon!
-              </p>
-            </div>
-          </div>
+          <CampaignMonitor />
         </div>
 
         {/* Disposition Tree Tab */}

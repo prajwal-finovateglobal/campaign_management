@@ -15,6 +15,7 @@ sys.path.insert(0, str(backend_path))
 from database.session import SessionLocal
 from database.dependencies import DB_DEPENDENCY
 from models.client import Campaign, Chunk
+from models.automation import CampaignJob
 from service.millis_api import start_campaign
 import loguru
 from sqlalchemy.exc import SQLAlchemyError
@@ -26,7 +27,8 @@ logger = loguru.logger.bind(test="process_campaign")
 
 async def process_campaign(db: DB_DEPENDENCY, campaign_id: int) -> tuple[bool, str]:
     """
-    Process all chunks for a campaign by starting them in Millis.ai.
+    Process a campaign by starting it in Millis.ai.
+    Handles both single and multiple type campaigns.
 
     Args:
         db: Database session (DB_DEPENDENCY)
@@ -44,7 +46,31 @@ async def process_campaign(db: DB_DEPENDENCY, campaign_id: int) -> tuple[bool, s
         if not campaign:
             return False, f"Campaign with ID {campaign_id} not found"
 
-        logger.info(f"Found campaign: {campaign.campaign_name}")
+        campaign_type = campaign.type if campaign.type else 'single'
+        logger.info(f"Found campaign: {campaign.campaign_name} (type: {campaign_type})")
+
+        # Handle single type campaigns
+        if campaign_type == 'single':
+            logger.info(f"Processing single type campaign {campaign_id}")
+            
+            if not campaign.cid:
+                return False, f"Campaign {campaign_id} has no CID (Millis.ai campaign ID)"
+            
+            # Start the campaign in Millis.ai
+            logger.info(f"Starting campaign {campaign.campaign_name} (CID: {campaign.cid}) in Millis.ai")
+            success, error_msg = await start_campaign(campaign.cid)
+            
+            if success:
+                logger.info(f"✅ Successfully started campaign {campaign_id} in Millis.ai")
+                campaign.status = "started"
+                db.commit()
+                return True, f"Campaign {campaign_id} started successfully"
+            else:
+                logger.error(f"❌ Failed to start campaign {campaign_id}: {error_msg}")
+                return False, f"Failed to start campaign: {error_msg}"
+
+        # Handle multiple type campaigns (process chunks)
+        logger.info(f"Processing multiple type campaign {campaign_id}")
 
         # Fetch all chunks where campaign_id = campaign_id and status != "finished"
         chunks = db.query(Chunk).filter(
@@ -143,26 +169,131 @@ async def process_campaign(db: DB_DEPENDENCY, campaign_id: int) -> tuple[bool, s
 
 
 async def main():
-    """Main test function."""
-    logger.info("Starting test of process_campaign function")
-
-    # Test with campaign_id 192
-    campaign_id = 192
-    logger.info(f"Testing with campaign_id: {campaign_id}")
+    """Main test function - processes all campaign jobs."""
+    logger.info("=" * 80)
+    logger.info("PROCESSING ALL CAMPAIGN JOBS")
+    logger.info("=" * 80)
 
     # Create database session with proper lifecycle management
     db = SessionLocal()
     try:
-        success, message = await process_campaign(db, campaign_id)
-
-        if success:
-            logger.info(f"✓ Test completed successfully: {message}")
-            db.commit()  # Commit successful changes
-        else:
-            logger.error(f"✗ Test failed: {message}")
-            db.rollback()  # Rollback on failure
-
-        return success, message
+        # Fetch all campaign jobs (optionally filter by status='queue')
+        campaign_jobs = db.query(CampaignJob).order_by(
+            CampaignJob.priority.desc(),
+            CampaignJob.created_at.asc()
+        ).all()
+        
+        if not campaign_jobs:
+            logger.info("No campaign jobs found in database")
+            return True, "No campaign jobs to process"
+        
+        logger.info(f"Found {len(campaign_jobs)} campaign job(s) to process")
+        logger.info("=" * 80)
+        
+        results = []
+        successful = 0
+        failed = 0
+        
+        # Process each campaign job
+        for idx, job in enumerate(campaign_jobs, 1):
+            logger.info("")
+            logger.info(f"{'=' * 80}")
+            logger.info(f"PROCESSING CAMPAIGN JOB {idx}/{len(campaign_jobs)}")
+            logger.info(f"{'=' * 80}")
+            logger.info(f"Job ID: {job.id}")
+            logger.info(f"Client ID: {job.client_id}")
+            logger.info(f"Campaign ID: {job.campaign_id}")
+            logger.info(f"Lot ID: {job.lot_id}")
+            logger.info(f"Status: {job.status}")
+            logger.info(f"Priority: {job.priority}")
+            logger.info(f"Action: {job.action}")
+            logger.info(f"{'=' * 80}")
+            
+            # Skip if action is 'stop' or 'pause'
+            if job.action in ['stop', 'pause']:
+                logger.info(f"⏸️  Skipping job {job.id} - action is '{job.action}'")
+                results.append({
+                    'job_id': job.id,
+                    'campaign_id': job.campaign_id,
+                    'status': 'skipped',
+                    'message': f"Action is '{job.action}'"
+                })
+                continue
+            
+            # Skip if already completed or failed
+            if job.status in ['completed', 'failed']:
+                logger.info(f"⏭️  Skipping job {job.id} - status is '{job.status}'")
+                results.append({
+                    'job_id': job.id,
+                    'campaign_id': job.campaign_id,
+                    'status': 'skipped',
+                    'message': f"Status is '{job.status}'"
+                })
+                continue
+            
+            try:
+                # Process the campaign
+                success, message = await process_campaign(db, job.campaign_id)
+                
+                if success:
+                    logger.info(f"✅ Campaign {job.campaign_id} processed successfully: {message}")
+                    successful += 1
+                    results.append({
+                        'job_id': job.id,
+                        'campaign_id': job.campaign_id,
+                        'status': 'success',
+                        'message': message
+                    })
+                else:
+                    logger.error(f"❌ Campaign {job.campaign_id} failed: {message}")
+                    failed += 1
+                    results.append({
+                        'job_id': job.id,
+                        'campaign_id': job.campaign_id,
+                        'status': 'failed',
+                        'message': message
+                    })
+                
+                # Commit after each campaign
+                db.commit()
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing campaign {job.campaign_id}: {str(e)}")
+                failed += 1
+                results.append({
+                    'job_id': job.id,
+                    'campaign_id': job.campaign_id,
+                    'status': 'error',
+                    'message': str(e)
+                })
+                db.rollback()
+                continue
+        
+        # Summary
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("PROCESSING SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Total Jobs: {len(campaign_jobs)}")
+        logger.info(f"✅ Successful: {successful}")
+        logger.info(f"❌ Failed: {failed}")
+        logger.info(f"⏭️  Skipped: {len(campaign_jobs) - successful - failed}")
+        logger.info("=" * 80)
+        
+        # Print detailed results
+        logger.info("")
+        logger.info("DETAILED RESULTS:")
+        for result in results:
+            status_icon = {
+                'success': '✅',
+                'failed': '❌',
+                'error': '❌',
+                'skipped': '⏭️'
+            }.get(result['status'], '❓')
+            
+            logger.info(f"{status_icon} Job {result['job_id']} (Campaign {result['campaign_id']}): {result['status']} - {result['message']}")
+        
+        return successful > 0, f"Processed {successful} successfully, {failed} failed"
 
     except SQLAlchemyError as e:
         logger.error(f"Database error occurred: {e}")

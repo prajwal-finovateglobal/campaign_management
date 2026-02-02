@@ -11,7 +11,7 @@ from service.disposition_jobs_service import (
     check_if_busy,
     check_job_alive,
     ensure_job_exists,
-    pause_other_campaigns,
+    pause_other_disposition_jobs,
     get_current_cursor,
     get_max_cursor,
     get_next_job,
@@ -129,13 +129,13 @@ async def run_orchestrator_loop(
     max_cursor: int
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
-    Main orchestrator loop - processes campaigns sequentially.
+    Main orchestrator loop - processes disposition jobs sequentially.
     
     Flow:
     1. Start with initial_campaign_id
     2. Process disposition until cursor >= max_cursor
     3. Mark as completed
-    4. Fetch next campaign by priority
+    4. Fetch next disposition job by priority
     5. Repeat until no more campaigns
     
     Args:
@@ -155,25 +155,25 @@ async def run_orchestrator_loop(
         iteration_count = 0
         
         # Ensure initial campaign exists
-        logger.info(f"Ensuring campaign {initial_campaign_id} exists...")
+        logger.info(f"Ensuring disposition job {initial_campaign_id} exists...")
         await ensure_job_exists(db, client_id, initial_campaign_id)
         
         # Reset all other campaigns to queue
-        logger.info(f"Resetting other campaigns to queue...")
-        await pause_other_campaigns(db, client_id, active_campaign_id)
+        logger.info(f"Resetting other disposition jobs to queue...")
+        await pause_other_disposition_jobs(db, client_id, active_campaign_id)
         
         # Set initial campaign to running
-        logger.info(f"Setting campaign {active_campaign_id} to 'running'...")
+        logger.info(f"Setting disposition job {active_campaign_id} to 'running'...")
         await set_job_status(db, client_id, active_campaign_id, 'running')
         
-        logger.info(f"🚀 Starting orchestrator loop with campaign {active_campaign_id}")
+        logger.info(f"🚀 Starting orchestrator loop with disposition job {active_campaign_id}")
         logger.info(f"=" * 80)
         
         # Main orchestrator loop
         while True:
             iteration_count += 1
             logger.info(f"\n{'='*80}")
-            logger.info(f"ITERATION {iteration_count}: Processing campaign {active_campaign_id}")
+            logger.info(f"ITERATION {iteration_count}: Processing disposition job {active_campaign_id}")
             logger.info(f"{'='*80}")
             
             # Fetch current cursor
@@ -186,7 +186,7 @@ async def run_orchestrator_loop(
             
             # Check if campaign is complete
             if cursor >= max_cursor:
-                logger.info(f"✅ Campaign {active_campaign_id} reached max cursor - marking as COMPLETED")
+                logger.info(f"✅ Disposition job {active_campaign_id} reached max cursor - marking as COMPLETED")
                 
                 # Mark current campaign as completed
                 await set_job_status(db, client_id, active_campaign_id, 'completed')
@@ -197,7 +197,7 @@ async def run_orchestrator_loop(
                 })
                 
                 # Fetch next campaign
-                logger.info(f"Fetching next campaign to process...")
+                logger.info(f"Fetching next disposition job to process...")
                 success, msg, next_campaign_id = await get_next_job(db, client_id)
                 
                 if not success:
@@ -210,20 +210,20 @@ async def run_orchestrator_loop(
                     break
                 
                 # Switch to next campaign
-                logger.info(f"➡️  Switching to next campaign: {next_campaign_id}")
+                logger.info(f"➡️  Switching to next disposition job: {next_campaign_id}")
                 active_campaign_id = next_campaign_id
                 
                 # Reset other campaigns to queue
-                await pause_other_campaigns(db, client_id, active_campaign_id)
+                await pause_other_disposition_jobs(db, client_id, active_campaign_id)
                 
                 # Set new campaign to running
                 await set_job_status(db, client_id, active_campaign_id, 'running')
                 
-                logger.info(f"✅ Campaign {active_campaign_id} is now RUNNING")
+                logger.info(f"✅ Disposition job {active_campaign_id} is now RUNNING")
                 continue
             
             # Process disposition (this will increment cursor)
-            logger.info(f"📊 Processing disposition for campaign {active_campaign_id}...")
+            logger.info(f"📊 Processing disposition for disposition job {active_campaign_id}...")
             success, msg, result = process_disposition(
                 db,
                 client_id,
@@ -253,13 +253,13 @@ async def run_orchestrator_loop(
         
         logger.info(f"=" * 80)
         logger.info(f"ORCHESTRATOR COMPLETE")
-        logger.info(f"Processed {len(campaigns_processed)} campaign(s)")
+        logger.info(f"Processed {len(campaigns_processed)} disposition job(s)")
         logger.info(f"Total iterations: {iteration_count}")
         logger.info(f"=" * 80)
         
         return (
             True,
-            f"Successfully processed {len(campaigns_processed)} campaign(s)",
+            f"Successfully processed {len(campaigns_processed)} disposition job(s)",
             final_result
         )
         

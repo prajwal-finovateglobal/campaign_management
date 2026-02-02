@@ -2,7 +2,47 @@ from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Boolean, J
 from database.session import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy import ForeignKey
-from sqlalchemy import text
+from sqlalchemy import text, CheckConstraint, UniqueConstraint
+
+
+class DataLot(Base):
+    """
+    Data lots (batches) that go through multiple phases of campaign processing.
+    Manages large datasets by breaking them into phases for systematic processing.
+    """
+    __tablename__ = "cms_data_lots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    name = Column(String(255), nullable=False)
+    client_id = Column(Integer, ForeignKey('cms_client.id', ondelete='CASCADE'), nullable=False)
+    max_phases = Column(Integer, nullable=False, default=1)
+    current_phase_no = Column(Integer, nullable=False, default=1)
+    status = Column(String(50), nullable=False, default='active')
+    total_records = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime(timezone=True), 
+        nullable=False, 
+        server_default=text("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')")
+    )
+    updated_at = Column(
+        DateTime(timezone=True), 
+        nullable=False, 
+        server_default=text("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')")
+    )
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Table constraints
+    __table_args__ = (
+        UniqueConstraint('name', 'client_id', name='uq_data_lots_name_client'),
+        CheckConstraint('max_phases > 0', name='chk_max_phases_positive'),
+        CheckConstraint('current_phase_no >= 1', name='chk_current_phase_positive'),
+        CheckConstraint('current_phase_no <= max_phases', name='chk_current_phase_within_max'),
+        CheckConstraint('total_records >= 0', name='chk_total_records_non_negative'),
+        CheckConstraint("status IN ('active', 'completed', 'paused', 'cancelled')", name='chk_status_valid'),
+    )
+
+    # Relationships
+    # campaign_jobs = relationship('CampaignJob', back_populates='data_lot')
 
 
 class CampaignConfigDefault(Base):
@@ -83,6 +123,7 @@ class CampaignJob(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, nullable=False)
     client_id = Column(BigInteger, nullable=False)
     campaign_id = Column(BigInteger, nullable=False)
+    lot_id = Column(Integer, ForeignKey('cms_data_lots.id', ondelete='SET NULL'), nullable=True)
     status = Column(String(20), nullable=False)  # queue, running, completed, failed, paused
     current_stage = Column(String(30), nullable=True)  # disposition, data_cleanup, iteration, etc.
     priority = Column(Integer, nullable=False, default=0)
@@ -101,6 +142,9 @@ class CampaignJob(Base):
         server_default=text("((timezone('Asia/Kolkata', NOW()))::timestamp AT TIME ZONE 'Asia/Kolkata')")
     )
     config = Column(JSON, nullable=True)  # Snapshot of configuration at job start
+
+    # Relationships
+    # data_lot = relationship('DataLot', back_populates='campaign_jobs')
 
 
 class DispositionJob(Base):

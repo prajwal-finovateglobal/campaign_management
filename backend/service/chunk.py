@@ -1,6 +1,10 @@
 from database.dependencies import DB_DEPENDENCY
-from models.client import Campaign, Chunk
-from service.csv_service import read_csv_data
+from models.client import Campaign, Chunk, Phase, Client
+from models.automation import DataLot, CampaignJob
+from service.csv_service import read_csv_data, get_csv_row_count, format_phone_numbers
+from service.campaign import create_campaign_service, upload_csv_records_to_campaign, delete_campaign_service
+from service.millis_api import create_campaign_in_millis, delete_campaign_in_millis
+from repo.campaign_jobs_repo import ensure_campaign_job
 from typing import Tuple, Optional, List, Dict, Any
 from datetime import datetime
 import loguru
@@ -754,5 +758,306 @@ async def get_chunk_status_service(db: DB_DEPENDENCY, chunk_id: int) -> Tuple[bo
     except Exception as e:
         error_msg = f"Error fetching chunk status: {str(e)}"
         logger.error(error_msg)
+        return False, error_msg, None
+
+
+async def create_campaign_with_lot(
+    db: DB_DEPENDENCY,
+    client_id: int,
+    campaign_type: str = 'single',
+    is_full: bool = True,
+    idx: Optional[int] = None,
+    size: Optional[int] = None,
+    priority: int = 0
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Create campaign with automatic phase_1 assignment, DataLot creation, and record upsert.
+    Complete end-to-end flow for first-time CSV uploads.
+    
+    Process:
+    1. Find phase_1 for the client (oldest phase by id)
+    2. Format phone numbers in CSV (ensure +91 prefix)
+    3. Create campaign in Millis.ai and database
+    4. Upsert records from CSV to campaign (handles both single and multiple types)
+    5. Check if campaign already has a lot_id in cms_campaign_jobs
+    6. If not, create new DataLot (representing this CSV batch)
+    7. Update DataLot.total_records with actual uploaded count (only if phase_1)
+    8. Ensure campaign job exists with lot_id
+    9. Error handling: Mark as failed, delete from Millis.ai, rollback DB
+    
+    Args:
+        db: Database session
+        client_id: Client ID
+        campaign_type: Type of campaign - 'single' (default) or 'multiple'
+        is_full: Whether to use full CSV (default: True)
+        idx: Starting index in CSV (required if is_full=False)
+        size: Number of records (required if is_full=False)
+        priority: Priority for campaign job (default: 0)
+    
+    Returns:
+        Tuple of (success, error_message, campaign_data)
+    """
+    logger.info(f"=" * 80)
+    logger.info(f"CREATING CAMPAIGN WITH LOT - END TO END")
+    logger.info(f"Client ID: {client_id}, Type: {campaign_type}")
+    logger.info(f"=" * 80)
+    
+    campaign_id = None
+    campaign_cid = None
+    lot_id = None
+    job = None
+    
+    try:
+        # Step 1: Find phase_1 (first phase for client by id)
+        logger.info(f"Step 1: Finding phase_1 for client_id={client_id}")
+        phases = db.query(Phase).filter(
+            Phase.client_id == client_id
+        ).order_by(Phase.id.asc()).all()
+        
+        if not phases:
+            error_msg = f"No phases found for client_id {client_id}. Please create a phase first."
+            logger.error(error_msg)
+            return False, error_msg, None
+        
+        phase_1 = phases[0]
+        phase_id = phase_1.id
+        phase_name = phase_1.name
+        is_phase_1 = True  # We're always in phase_1 for this function
+        
+        logger.info(f"✅ Found phase_1: id={phase_id}, name={phase_name}")
+        
+        # Step 2: Format phone numbers in CSV (ensure +91 prefix)
+        logger.info(f"Step 2: Formatting phone numbers in CSV (ensure +91 prefix)")
+        format_success, format_msg, format_count = format_phone_numbers()
+        if not format_success:
+            logger.warning(f"Phone formatting failed or not needed: {format_msg}")
+        else:
+            logger.info(f"✅ Phone formatting: {format_msg}")
+        
+        # Step 3: Create campaign using existing service
+        logger.info(f"Step 3: Creating campaign in Millis.ai and database")
+        success, error_msg, campaign_data = await create_campaign_service(
+            db=db,
+            phase_id=phase_id,
+            phase_name=phase_name,
+            campaign_type=campaign_type,
+            is_full=is_full,
+            idx=idx,
+            size=size
+        )
+        
+        if not success or not campaign_data:
+            error_msg = error_msg or "Failed to create campaign"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg, None
+        
+        campaign_id = campaign_data['id']
+        campaign_cid = campaign_data.get('cid')
+        logger.info(f"✅ Created campaign: id={campaign_id}, cid={campaign_cid}, name={campaign_data.get('campaign_name')}")
+        
+        # Step 4: Upsert records from CSV
+        logger.info(f"Step 4: Upserting records from CSV to campaign")
+        records_uploaded = 0
+        
+        try:
+            if campaign_type == 'multiple':
+                # For multiple type: create chunks first, then upsert
+                # Note: chunks should be created before calling this function
+                # But if not, we'll try to upsert anyway
+                logger.info(f"Multiple type campaign - using upsert_all_chunks")
+                upsert_success, upsert_error, upsert_data = await upsert_all_chunks(db, campaign_id)
+                
+                if not upsert_success:
+                    raise Exception(f"Failed to upsert chunks: {upsert_error}")
+                
+                records_uploaded = upsert_data.get('total_records', 0) if upsert_data else 0
+                logger.info(f"✅ Upserted {records_uploaded} records via chunks")
+            else:
+                # For single type: upload directly
+                logger.info(f"Single type campaign - uploading records directly")
+                upsert_success, upsert_error, records_count = await upload_csv_records_to_campaign(db, campaign_id)
+                
+                if not upsert_success:
+                    raise Exception(f"Failed to upload records: {upsert_error}")
+                
+                records_uploaded = records_count if records_count else 0
+                logger.info(f"✅ Upserted {records_uploaded} records")
+                
+        except Exception as upsert_error:
+            # Mark as failed first
+            logger.error(f"❌ Upsert failed: {upsert_error}")
+            
+            # Mark campaign job as failed (if exists)
+            if campaign_id:
+                try:
+                    existing_job = db.query(CampaignJob).filter(
+                        CampaignJob.campaign_id == campaign_id
+                    ).first()
+                    if existing_job:
+                        existing_job.status = 'failed'
+                        db.commit()
+                        logger.info(f"Marked campaign job as 'failed'")
+                except Exception as e:
+                    logger.warning(f"Could not mark job as failed: {e}")
+            
+            # Delete from Millis.ai
+            if campaign_cid:
+                try:
+                    logger.info(f"Deleting campaign from Millis.ai: cid={campaign_cid}")
+                    await delete_campaign_in_millis(campaign_cid)
+                    logger.info(f"✅ Deleted campaign from Millis.ai")
+                except Exception as e:
+                    logger.error(f"Failed to delete from Millis.ai: {e}")
+            
+            # Rollback DB (delete campaign, lot, job)
+            try:
+                if campaign_id:
+                    logger.info(f"Rolling back: Deleting campaign from DB: id={campaign_id}")
+                    # Delete campaign (this will cascade delete related records)
+                    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+                    if campaign:
+                        db.delete(campaign)
+                        db.commit()
+                        logger.info(f"✅ Deleted campaign from DB")
+            except Exception as e:
+                logger.error(f"Failed to rollback DB: {e}")
+                db.rollback()
+            
+            return False, f"Upsert failed: {str(upsert_error)}", None
+        
+        # Step 5: Check if campaign already has a lot_id
+        logger.info(f"Step 5: Checking for existing lot_id")
+        existing_job = db.query(CampaignJob).filter(
+            CampaignJob.campaign_id == campaign_id
+        ).first()
+        
+        if existing_job and existing_job.lot_id:
+            # Campaign already has a lot - reuse it
+            lot_id = existing_job.lot_id
+            logger.info(f"✅ Campaign already has lot_id={lot_id}, reusing existing lot")
+        else:
+            # Create new DataLot (this is a new CSV batch)
+            logger.info(f"Creating new DataLot for this CSV batch")
+            client = db.query(Client).filter(Client.id == client_id).first()
+            if not client:
+                error_msg = f"Client with id {client_id} not found"
+                logger.error(f"❌ {error_msg}")
+                return False, error_msg, None
+            
+            client_name = client.name
+            
+            # Count existing lots for this client to generate name
+            existing_lots_count = db.query(DataLot).filter(
+                DataLot.client_id == client_id
+            ).count()
+            
+            lot_name = f"{client_name}_lot_{existing_lots_count + 1}"
+            
+            # Count total phases for this client
+            total_phases = len(phases)
+            
+            # Create new DataLot (total_records will be updated after upsert)
+            new_lot = DataLot(
+                name=lot_name,
+                client_id=client_id,
+                max_phases=total_phases,
+                current_phase_no=1,
+                status='active',
+                total_records=0  # Will be updated below
+            )
+            
+            db.add(new_lot)
+            db.flush()  # Flush to get the ID
+            lot_id = new_lot.id
+            
+            logger.info(f"✅ Created new DataLot: id={lot_id}, name={lot_name}")
+        
+        # Step 6: Update DataLot.total_records (only if phase_1)
+        if is_phase_1 and lot_id and records_uploaded > 0:
+            logger.info(f"Step 6: Updating DataLot.total_records (phase_1): {records_uploaded} records")
+            try:
+                lot = db.query(DataLot).filter(DataLot.id == lot_id).first()
+                if lot:
+                    lot.total_records = records_uploaded
+                    db.commit()
+                    logger.info(f"✅ Updated DataLot.total_records to {records_uploaded}")
+            except Exception as e:
+                logger.warning(f"Could not update DataLot.total_records: {e}")
+        
+        # Step 7: Ensure campaign job exists
+        logger.info(f"Step 7: Ensuring campaign job exists")
+        try:
+            job = await ensure_campaign_job(
+                db=db,
+                client_id=client_id,
+                lot_id=lot_id,
+                campaign_id=campaign_id,
+                priority=priority
+            )
+            logger.info(f"✅ Ensured campaign job exists: job_id={job.id}, status={job.status}")
+        except Exception as e:
+            logger.error(f"❌ Error ensuring campaign job: {e}")
+            raise
+        
+        # Return enriched campaign data
+        result_data = {
+            **campaign_data,
+            'lot_id': lot_id,
+            'phase_id': phase_id,
+            'phase_name': phase_name,
+            'records_uploaded': records_uploaded
+        }
+        
+        logger.info(f"=" * 80)
+        logger.info(f"✅ SUCCESS: Campaign created with lot")
+        logger.info(f"Campaign ID: {campaign_id}, Lot ID: {lot_id}, Records: {records_uploaded}")
+        logger.info(f"=" * 80)
+        
+        return True, None, result_data
+        
+    except Exception as e:
+        logger.error(f"=" * 80)
+        logger.error(f"❌ ERROR: {str(e)}")
+        logger.error(f"=" * 80)
+        
+        # Error handling: Mark as failed, then rollback
+        try:
+            # Mark as failed first
+            if campaign_id:
+                existing_job = db.query(CampaignJob).filter(
+                    CampaignJob.campaign_id == campaign_id
+                ).first()
+                if existing_job:
+                    existing_job.status = 'failed'
+                    db.commit()
+                    logger.info(f"Marked campaign job as 'failed'")
+        except Exception as mark_error:
+            logger.warning(f"Could not mark as failed: {mark_error}")
+        
+        # Delete from Millis.ai
+        if campaign_cid:
+            try:
+                logger.info(f"Deleting campaign from Millis.ai: cid={campaign_cid}")
+                await delete_campaign_in_millis(campaign_cid)
+                logger.info(f"✅ Deleted from Millis.ai")
+            except Exception as delete_error:
+                logger.error(f"Failed to delete from Millis.ai: {delete_error}")
+        
+        # Rollback DB
+        try:
+            if campaign_id:
+                campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+                if campaign:
+                    db.delete(campaign)
+                    db.commit()
+                    logger.info(f"✅ Rolled back DB")
+        except Exception as rollback_error:
+            logger.error(f"Failed to rollback DB: {rollback_error}")
+        
+        db.rollback()
+        error_msg = f"Error creating campaign with lot: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
         return False, error_msg, None
 
