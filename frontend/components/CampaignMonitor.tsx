@@ -138,8 +138,7 @@ export function CampaignMonitor({}: CampaignMonitorProps) {
     <div className="w-full space-y-4">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold text-[var(--foreground)]">Campaign Monitor</h2>
-        <p className="text-sm text-[var(--secondary)] mt-1">Observability dashboard for workflow state and progress</p>
+        <h2 className="text-2xl font-bold text-[var(--foreground)]">Monitor</h2>
       </div>
 
       {/* Health & Legend Bar */}

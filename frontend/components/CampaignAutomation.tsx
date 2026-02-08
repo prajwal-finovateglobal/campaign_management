@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Play, 
   Pause, 
@@ -15,7 +15,9 @@ import {
   Settings,
   X,
   Circle,
-  RotateCw
+  RotateCw,
+  Lock,
+  ChevronRight
 } from 'lucide-react';
 
 interface CampaignAutomationProps {}
@@ -70,6 +72,44 @@ interface CampaignConfig {
   priority: 'high' | 'medium' | 'low';
 }
 
+// Default Configuration (cms_campaign_config_defaults)
+interface DefaultConfig {
+  id?: string;
+  name: string;
+  description?: string;
+  enable_disposition: boolean;
+  enable_data_cleanup: boolean;
+  enable_auto_iteration: boolean;
+  campaign_priority: 'low' | 'medium' | 'high';
+  disposition_priority: 'low' | 'medium' | 'high';
+  chunk_size: number;
+  attempts: number;
+  retry_on_failure: boolean;
+  max_retries: number;
+  on_failure_action: 'pause' | 'stop' | 'notify';
+  is_active_default: boolean;
+  client_id?: string;
+}
+
+// Campaign Configuration (cms_campaign_config)
+interface CampaignConfigFull {
+  id?: string;
+  campaign_id?: string;
+  default_config_id?: string;
+  enable_disposition: boolean;
+  enable_data_cleanup: boolean;
+  enable_next_iteration: boolean;
+  campaign_priority: 'low' | 'medium' | 'high';
+  disposition_priority: 'low' | 'medium' | 'high';
+  chunk_size: number;
+  retry_on_failure: boolean;
+  max_retries: number;
+  on_failure_action: 'pause' | 'stop' | 'notify';
+  data_scope?: any; // JSON
+  created_at?: string;
+  locked_at?: string | null;
+}
+
 export function CampaignAutomation({}: CampaignAutomationProps) {
   const [expandedSections, setExpandedSections] = useState({
     campaign: true,
@@ -82,7 +122,12 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<ActiveItem | UpcomingItem | null>(null);
   const [createStep, setCreateStep] = useState(1);
-  const [useDefaultConfig, setUseDefaultConfig] = useState(true);
+  
+  // Config modal states
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configMode, setConfigMode] = useState<'default' | 'campaign'>('default');
+  const [configData, setConfigData] = useState<DefaultConfig | CampaignConfigFull | null>(null);
+  const [isConfigLocked, setIsConfigLocked] = useState(false);
   
   // Awake states
   const [showAwakeModal, setShowAwakeModal] = useState(false);
@@ -93,13 +138,18 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
   const [createForm, setCreateForm] = useState({
     name: '',
     lotId: '',
-    priority: 'medium' as 'high' | 'medium' | 'low',
+    useDefaultConfig: true,
+    defaultConfigId: '',
     config: {
-      enableDisposition: true,
-      enableDataManager: true,
-      batchSize: 100,
-      maxPhases: 10,
-      priority: 'medium' as 'high' | 'medium' | 'low'
+      enable_disposition: true,
+      enable_data_cleanup: true,
+      enable_next_iteration: true,
+      campaign_priority: 'medium' as 'low' | 'medium' | 'high',
+      disposition_priority: 'medium' as 'low' | 'medium' | 'high',
+      chunk_size: 100,
+      retry_on_failure: true,
+      max_retries: 3,
+      on_failure_action: 'pause' as 'pause' | 'stop' | 'notify'
     }
   });
 
@@ -112,6 +162,13 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
     priority: 'medium'
   });
 
+  // Sync locked state with configData
+  useEffect(() => {
+    if (configData && 'locked_at' in configData) {
+      setIsConfigLocked(configData.locked_at !== null && configData.locked_at !== undefined);
+    }
+  }, [configData]);
+
   const toggleSection = (section: 'campaign' | 'disposition' | 'dataManager') => {
     setExpandedSections(prev => ({
       ...prev,
@@ -122,33 +179,74 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
   const handleCreateCampaign = () => {
     setShowCreateModal(true);
     setCreateStep(1);
-    setUseDefaultConfig(true);
     setCreateForm({
       name: '',
       lotId: '',
-      priority: 'medium',
+      useDefaultConfig: true,
+      defaultConfigId: '',
       config: {
-        enableDisposition: true,
-        enableDataManager: true,
-        batchSize: 100,
-        maxPhases: 10,
-        priority: 'medium'
+        enable_disposition: true,
+        enable_data_cleanup: true,
+        enable_next_iteration: true,
+        campaign_priority: 'medium',
+        disposition_priority: 'medium',
+        chunk_size: 100,
+        retry_on_failure: true,
+        max_retries: 3,
+        on_failure_action: 'pause'
       }
     });
   };
 
   const handleEditCampaign = (campaign: ActiveItem | UpcomingItem) => {
-    if (campaign.status === 'queued') {
-      setEditingCampaign(campaign);
-      setEditForm({
-        enableDisposition: campaign.enableDisposition ?? true,
-        enableDataManager: campaign.enableDataManager ?? true,
-        batchSize: campaign.batchSize ?? 100,
-        maxPhases: campaign.maxPhases ?? 10,
-        priority: campaign.priority
-      });
-      setShowEditModal(true);
-    }
+    // Open config modal in campaign mode
+    setConfigMode('campaign');
+    
+    // Create campaign config from campaign data
+    const campaignConfig: CampaignConfigFull = {
+      enable_disposition: campaign.enableDisposition ?? true,
+      enable_data_cleanup: true,
+      enable_next_iteration: true,
+      campaign_priority: campaign.priority,
+      disposition_priority: campaign.priority,
+      chunk_size: campaign.batchSize ?? 100,
+      retry_on_failure: true,
+      max_retries: 3,
+      on_failure_action: 'pause',
+      locked_at: campaign.status === 'running' || campaign.status === 'completed' ? new Date().toISOString() : null,
+      default_config_id: campaign.defaultConfigName ? 'default-1' : undefined
+    };
+    
+    // Set locked state based on campaign status or locked_at
+    setIsConfigLocked(campaignConfig.locked_at !== null);
+    
+    setConfigData(campaignConfig);
+    setShowConfigModal(true);
+  };
+
+  const handleOpenDefaultConfig = () => {
+    setConfigMode('default');
+    setIsConfigLocked(false);
+    
+    // Initialize default config
+    const defaultConfig: DefaultConfig = {
+      name: '',
+      description: '',
+      enable_disposition: true,
+      enable_data_cleanup: true,
+      enable_auto_iteration: true,
+      campaign_priority: 'medium',
+      disposition_priority: 'medium',
+      chunk_size: 100,
+      attempts: 1,
+      retry_on_failure: true,
+      max_retries: 3,
+      on_failure_action: 'pause',
+      is_active_default: false
+    };
+    
+    setConfigData(defaultConfig);
+    setShowConfigModal(true);
   };
 
   const handleSaveCreate = () => {
@@ -589,11 +687,8 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-2xl font-bold" style={{ color: 'var(--ops-text-primary)' }}>
-              Campaign Automation
+              Automation
             </h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--ops-text-secondary)' }}>
-              Real-time workflow monitoring and control
-            </p>
           </div>
           <button
             onClick={handleCreateCampaign}
@@ -1479,13 +1574,19 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
           />
           <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
             <div 
-              className="glass-modal rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              className="glass-modal rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold" style={{ color: 'var(--ops-text-primary)' }}>
-                  Create Campaign Automation
-                </h3>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6 sticky top-0 bg-inherit pb-4 border-b" style={{ borderColor: 'var(--ops-border)' }}>
+                <div>
+                  <h3 className="text-xl font-bold" style={{ color: 'var(--ops-text-primary)' }}>
+                    Create Automation
+                  </h3>
+                  <p className="text-xs mt-1" style={{ color: 'var(--ops-text-secondary)' }}>
+                    {createStep === 1 ? 'Basic campaign information' : 'Configure campaign execution settings'}
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowCreateModal(false)}
                   className="p-1 rounded hover:bg-[var(--ops-bg-surface)]"
@@ -1495,81 +1596,79 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
               </div>
 
               {createStep === 1 && (
-                <div className="space-y-4">
+                <div className="space-y-6">
+                  {/* Basic Info Section */}
                   <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                      Campaign Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={createForm.name}
-                      onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                      className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                      style={{ 
-                        color: 'var(--ops-text-primary)'
-                      }}
-                      placeholder="Enter campaign name"
-                    />
+                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                      <ChevronRight className="w-4 h-4" />
+                      Basic Information
+                    </h4>
+                    <div className="space-y-4 pl-6">
+                      <div>
+                        <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          Campaign Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={createForm.name}
+                          onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                          className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                          style={{ 
+                            color: 'var(--ops-text-primary)'
+                          }}
+                          placeholder="Enter campaign name"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          Data Lot <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={createForm.lotId}
+                          onChange={(e) => setCreateForm({ ...createForm, lotId: e.target.value })}
+                          className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                          style={{ 
+                            color: 'var(--ops-text-primary)'
+                          }}
+                        >
+                          <option value="">Select a lot</option>
+                          <option value="1">Lot 1</option>
+                          <option value="2">Lot 2</option>
+                          <option value="3">Lot 3</option>
+                          <option value="4">Lot 4</option>
+                          <option value="5">Lot 5</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                      Data Lot <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={createForm.lotId}
-                      onChange={(e) => setCreateForm({ ...createForm, lotId: e.target.value })}
-                      className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                      style={{ 
-                        color: 'var(--ops-text-primary)'
-                      }}
-                    >
-                      <option value="">Select a lot</option>
-                      <option value="1">Lot 1</option>
-                      <option value="2">Lot 2</option>
-                      <option value="3">Lot 3</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                      Priority
-                    </label>
-                    <select
-                      value={createForm.priority}
-                      onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value as 'high' | 'medium' | 'low' })}
-                      className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                      style={{ 
-                        color: 'var(--ops-text-primary)'
-                      }}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                  </div>
-
-                  <div className="flex gap-3 pt-4">
+                  {/* Footer Actions */}
+                  <div className="flex gap-3 pt-4 border-t sticky bottom-0 bg-inherit pb-2" style={{ borderColor: 'var(--ops-border)' }}>
                     <button
                       onClick={() => setShowCreateModal(false)}
-                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border"
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border transition-all"
                       style={{ 
                         borderColor: 'var(--ops-border)',
                         color: 'var(--ops-text-primary)',
                         background: 'transparent'
                       }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--ops-bg-surface)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                       Cancel
                     </button>
                     <button
                       onClick={() => setCreateStep(2)}
                       disabled={!createForm.name || !createForm.lotId}
-                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all"
                       style={{ 
                         background: 'var(--ops-accent-campaign)',
                         color: 'white',
                         opacity: (!createForm.name || !createForm.lotId) ? 0.5 : 1
                       }}
+                      onMouseEnter={(e) => e.currentTarget.style.opacity = (!createForm.name || !createForm.lotId) ? '0.5' : '0.9'}
+                      onMouseLeave={(e) => e.currentTarget.style.opacity = (!createForm.name || !createForm.lotId) ? '0.5' : '1'}
                     >
                       Next: Configuration
                     </button>
@@ -1578,17 +1677,19 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
               )}
 
               {createStep === 2 && (
-                <div className="space-y-4">
+                <div className="space-y-6">
+                  {/* Config Source Section */}
                   <div>
-                    <label className="block text-sm font-medium mb-3" style={{ color: 'var(--ops-text-primary)' }}>
-                      Configuration
-                    </label>
-                    <div className="space-y-3">
+                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                      <ChevronRight className="w-4 h-4" />
+                      Configuration Source
+                    </h4>
+                    <div className="space-y-3 pl-6">
                       <label className="flex items-center gap-3 p-3 rounded-lg glass-input cursor-pointer transition-all hover:opacity-90">
                         <input
                           type="radio"
-                          checked={useDefaultConfig}
-                          onChange={() => setUseDefaultConfig(true)}
+                          checked={createForm.useDefaultConfig}
+                          onChange={() => setCreateForm({ ...createForm, useDefaultConfig: true })}
                           className="w-4 h-4"
                         />
                         <div>
@@ -1604,8 +1705,8 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
                       <label className="flex items-center gap-3 p-3 rounded-lg glass-input cursor-pointer transition-all hover:opacity-90">
                         <input
                           type="radio"
-                          checked={!useDefaultConfig}
-                          onChange={() => setUseDefaultConfig(false)}
+                          checked={!createForm.useDefaultConfig}
+                          onChange={() => setCreateForm({ ...createForm, useDefaultConfig: false })}
                           className="w-4 h-4"
                         />
                         <div>
@@ -1617,74 +1718,196 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
                     </div>
                   </div>
 
-                  {!useDefaultConfig && (
-                    <div className="space-y-4 p-4 rounded-lg glass-input">
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={createForm.config.enableDisposition}
-                          onChange={(e) => setCreateForm({
-                            ...createForm,
-                            config: { ...createForm.config, enableDisposition: e.target.checked }
-                          })}
-                          className="w-4 h-4"
-                        />
-                        <label className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
-                          Enable Disposition
-                        </label>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={createForm.config.enableDataManager}
-                          onChange={(e) => setCreateForm({
-                            ...createForm,
-                            config: { ...createForm.config, enableDataManager: e.target.checked }
-                          })}
-                          className="w-4 h-4"
-                        />
-                        <label className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
-                          Enable Data Manager
-                        </label>
-                      </div>
-
+                  {!createForm.useDefaultConfig && (
+                    <>
+                      {/* Execution Behavior Section */}
                       <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                          Batch Size
-                        </label>
-                        <input
-                          type="number"
-                          value={createForm.config.batchSize}
-                          onChange={(e) => setCreateForm({
-                            ...createForm,
-                            config: { ...createForm.config, batchSize: parseInt(e.target.value) || 100 }
-                          })}
-                          className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                          style={{ 
-                            color: 'var(--ops-text-primary)'
-                          }}
-                        />
+                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          <ChevronRight className="w-4 h-4" />
+                          Execution Behavior
+                        </h4>
+                        <div className="space-y-3 pl-6">
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={createForm.config.enable_disposition}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, enable_disposition: e.target.checked }
+                              })}
+                              className="w-4 h-4"
+                            />
+                            <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Disposition</span>
+                          </label>
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={createForm.config.enable_data_cleanup}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, enable_data_cleanup: e.target.checked }
+                              })}
+                              className="w-4 h-4"
+                            />
+                            <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Data Cleanup</span>
+                          </label>
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={createForm.config.enable_next_iteration}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, enable_next_iteration: e.target.checked }
+                              })}
+                              className="w-4 h-4"
+                            />
+                            <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Next Iteration</span>
+                          </label>
+                        </div>
                       </div>
 
+                      {/* Priorities Section */}
                       <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                          Max Phases
-                        </label>
-                        <input
-                          type="number"
-                          value={createForm.config.maxPhases}
-                          onChange={(e) => setCreateForm({
-                            ...createForm,
-                            config: { ...createForm.config, maxPhases: parseInt(e.target.value) || 10 }
-                          })}
-                          className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                          style={{ 
-                            color: 'var(--ops-text-primary)'
-                          }}
-                        />
+                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          <ChevronRight className="w-4 h-4" />
+                          Priorities
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4 pl-6">
+                          <div>
+                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                              Campaign Priority
+                            </label>
+                            <select
+                              value={createForm.config.campaign_priority}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, campaign_priority: e.target.value as 'low' | 'medium' | 'high' }
+                              })}
+                              className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                              style={{ 
+                                color: 'var(--ops-text-primary)'
+                              }}
+                            >
+                              <option value="low">Low</option>
+                              <option value="medium">Medium</option>
+                              <option value="high">High</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                              Disposition Priority
+                            </label>
+                            <select
+                              value={createForm.config.disposition_priority}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, disposition_priority: e.target.value as 'low' | 'medium' | 'high' }
+                              })}
+                              className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                              style={{ 
+                                color: 'var(--ops-text-primary)'
+                              }}
+                            >
+                              <option value="low">Low</option>
+                              <option value="medium">Medium</option>
+                              <option value="high">High</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+
+                      {/* Processing Section */}
+                      <div>
+                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          <ChevronRight className="w-4 h-4" />
+                          Processing
+                        </h4>
+                        <div className="pl-6">
+                          <div>
+                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                              Chunk Size
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={createForm.config.chunk_size}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, chunk_size: Math.max(1, parseInt(e.target.value) || 100) }
+                              })}
+                              className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                              style={{ 
+                                color: 'var(--ops-text-primary)'
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Failure Handling Section */}
+                      <div>
+                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          <ChevronRight className="w-4 h-4" />
+                          Failure Handling
+                        </h4>
+                        <div className="space-y-4 pl-6">
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={createForm.config.retry_on_failure}
+                              onChange={(e) => setCreateForm({
+                                ...createForm,
+                                config: { ...createForm.config, retry_on_failure: e.target.checked }
+                              })}
+                              className="w-4 h-4"
+                            />
+                            <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Retry on Failure</span>
+                          </label>
+                          {createForm.config.retry_on_failure && (
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                                  Max Retries
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={createForm.config.max_retries}
+                                  onChange={(e) => setCreateForm({
+                                    ...createForm,
+                                    config: { ...createForm.config, max_retries: Math.max(0, parseInt(e.target.value) || 0) }
+                                  })}
+                                  className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                                  style={{ 
+                                    color: 'var(--ops-text-primary)'
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                                  On Failure Action
+                                </label>
+                                <select
+                                  value={createForm.config.on_failure_action}
+                                  onChange={(e) => setCreateForm({
+                                    ...createForm,
+                                    config: { ...createForm.config, on_failure_action: e.target.value as 'pause' | 'stop' | 'notify' }
+                                  })}
+                                  className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                                  style={{ 
+                                    color: 'var(--ops-text-primary)'
+                                  }}
+                                >
+                                  <option value="pause">Pause</option>
+                                  <option value="stop">Stop</option>
+                                  <option value="notify">Notify</option>
+                                </select>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
                   )}
 
                   <div className="p-3 rounded-lg glass-input">
@@ -1693,25 +1916,30 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
                     </p>
                   </div>
 
-                  <div className="flex gap-3 pt-4">
+                  {/* Footer Actions */}
+                  <div className="flex gap-3 pt-4 border-t sticky bottom-0 bg-inherit pb-2" style={{ borderColor: 'var(--ops-border)' }}>
                     <button
                       onClick={() => setCreateStep(1)}
-                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border"
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border transition-all"
                       style={{ 
                         borderColor: 'var(--ops-border)',
                         color: 'var(--ops-text-primary)',
                         background: 'transparent'
                       }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--ops-bg-surface)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                       Back
                     </button>
                     <button
                       onClick={handleSaveCreate}
-                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all"
                       style={{ 
                         background: 'var(--ops-accent-campaign)',
                         color: 'white'
                       }}
+                      onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
+                      onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
                     >
                       Create & Queue Campaign
                     </button>
@@ -1723,145 +1951,603 @@ export function CampaignAutomation({}: CampaignAutomationProps) {
         </>
       )}
 
-      {/* Edit Campaign Configuration Modal */}
-      {showEditModal && editingCampaign && (
+      {/* Campaign Configuration Modal */}
+      {showConfigModal && configData && (
         <>
           <div 
             className="fixed inset-0 bg-black/60 backdrop-blur-md z-50"
-            onClick={() => setShowEditModal(false)}
+            onClick={() => !isConfigLocked && setShowConfigModal(false)}
           />
           <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
             <div 
-              className="glass-modal rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              className="glass-modal rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold" style={{ color: 'var(--ops-text-primary)' }}>
-                  Edit Campaign Configuration
-                </h3>
-                <button
-                  onClick={() => setShowEditModal(false)}
-                  className="p-1 rounded hover:bg-[var(--ops-bg-surface)]"
-                >
-                  <X className="w-5 h-5" style={{ color: 'var(--ops-text-secondary)' }} />
-                </button>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6 sticky top-0 bg-inherit pb-4 border-b" style={{ borderColor: 'var(--ops-border)' }}>
+                <div>
+                  <h3 className="text-xl font-bold" style={{ color: 'var(--ops-text-primary)' }}>
+                    {configMode === 'default' ? 'Default Configuration' : 'Campaign Configuration'}
+                  </h3>
+                  <p className="text-xs mt-1" style={{ color: 'var(--ops-text-secondary)' }}>
+                    {configMode === 'default' ? 'Create or edit a reusable template' : 'Configure campaign execution settings'}
+                  </p>
+                </div>
+                {!isConfigLocked && (
+                  <button
+                    onClick={() => setShowConfigModal(false)}
+                    className="p-1 rounded hover:bg-[var(--ops-bg-surface)]"
+                  >
+                    <X className="w-5 h-5" style={{ color: 'var(--ops-text-secondary)' }} />
+                  </button>
+                )}
               </div>
 
-              {editingCampaign.status === 'queued' && (
-                <>
-                  <div className="p-3 rounded-lg mb-4" style={{ background: 'var(--ops-accent-campaign-bg)', border: '1px solid var(--ops-accent-campaign-border)' }}>
-                    <p className="text-sm font-medium" style={{ color: 'var(--ops-accent-campaign)' }}>
-                      This campaign has not started yet. Changes are allowed.
-                    </p>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                        Priority
-                      </label>
-                      <select
-                        value={editForm.priority}
-                        onChange={(e) => setEditForm({ ...editForm, priority: e.target.value as 'high' | 'medium' | 'low' })}
-                        className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                        style={{ 
-                          color: 'var(--ops-text-primary)'
-                        }}
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
-                        Batch Size
-                      </label>
-                      <input
-                        type="number"
-                        value={editForm.batchSize}
-                        onChange={(e) => setEditForm({ ...editForm, batchSize: parseInt(e.target.value) || 100 })}
-                        className="glass-input w-full px-3 py-2 rounded-lg transition-all"
-                        style={{ 
-                          color: 'var(--ops-text-primary)'
-                        }}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={editForm.enableDisposition}
-                        onChange={(e) => setEditForm({ ...editForm, enableDisposition: e.target.checked })}
-                        className="w-4 h-4"
-                      />
-                      <label className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
-                        Enable Disposition
-                      </label>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={editForm.enableDataManager}
-                        onChange={(e) => setEditForm({ ...editForm, enableDataManager: e.target.checked })}
-                        className="w-4 h-4"
-                      />
-                      <label className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
-                        Enable Data Manager
-                      </label>
-                    </div>
-
-                    {editingCampaign.defaultConfigName && (
-                      <div className="p-3 rounded-lg glass-input">
-                        <div className="text-xs font-medium mb-1" style={{ color: 'var(--ops-text-secondary)' }}>
-                          Default Config Used
-                        </div>
-                        <div className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
-                          {editingCampaign.defaultConfigName}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex gap-3 pt-4">
-                      <button
-                        onClick={() => setShowEditModal(false)}
-                        className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border"
-                        style={{ 
-                          borderColor: 'var(--ops-border)',
-                          color: 'var(--ops-text-primary)',
-                          background: 'transparent'
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm('Changes will affect how this campaign runs. Continue?')) {
-                            handleSaveEdit();
-                          }
-                        }}
-                        className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
-                        style={{ 
-                          background: 'var(--ops-accent-campaign)',
-                          color: 'white'
-                        }}
-                      >
-                        Save Changes
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {editingCampaign.status !== 'queued' && (
-                <div className="p-4 rounded-lg text-center" style={{ background: 'var(--ops-bg-surface)' }}>
-                  <p className="text-sm" style={{ color: 'var(--ops-text-secondary)' }}>
-                    Configuration is locked once execution begins.
+              {/* Locked Banner */}
+              {isConfigLocked && (
+                <div className="p-3 rounded-lg mb-4 flex items-center gap-2" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                  <Lock className="w-4 h-4 text-red-500" />
+                  <p className="text-sm font-medium text-red-500">
+                    This configuration is locked because the campaign has started.
                   </p>
                 </div>
               )}
+
+              <div className="space-y-6">
+                {/* MODE 1: Default Configuration */}
+                {configMode === 'default' && configData && 'name' in configData && (
+                  <>
+                    {/* Basic Info Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Basic Info
+                      </h4>
+                      <div className="space-y-4 pl-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={configData.name}
+                            onChange={(e) => setConfigData({ ...configData, name: e.target.value })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                            placeholder="Enter configuration name"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Description
+                          </label>
+                          <textarea
+                            value={configData.description || ''}
+                            onChange={(e) => setConfigData({ ...configData, description: e.target.value })}
+                            disabled={isConfigLocked}
+                            rows={3}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all resize-none"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                            placeholder="Optional description"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Execution Behavior Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Execution Behavior
+                      </h4>
+                      <div className="space-y-3 pl-6">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.enable_disposition}
+                            onChange={(e) => setConfigData({ ...configData, enable_disposition: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Disposition</span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.enable_data_cleanup}
+                            onChange={(e) => setConfigData({ ...configData, enable_data_cleanup: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Data Cleanup</span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.enable_auto_iteration}
+                            onChange={(e) => setConfigData({ ...configData, enable_auto_iteration: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Auto Iteration</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Priorities Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Priorities
+                      </h4>
+                      <div className="grid grid-cols-2 gap-4 pl-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Campaign Priority
+                          </label>
+                          <select
+                            value={configData.campaign_priority}
+                            onChange={(e) => setConfigData({ ...configData, campaign_priority: e.target.value as 'low' | 'medium' | 'high' })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Disposition Priority
+                          </label>
+                          <select
+                            value={configData.disposition_priority}
+                            onChange={(e) => setConfigData({ ...configData, disposition_priority: e.target.value as 'low' | 'medium' | 'high' })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Processing Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Processing
+                      </h4>
+                      <div className="grid grid-cols-2 gap-4 pl-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Chunk Size
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={configData.chunk_size}
+                            onChange={(e) => setConfigData({ ...configData, chunk_size: Math.max(1, parseInt(e.target.value) || 100) })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Attempts
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={configData.attempts}
+                            onChange={(e) => setConfigData({ ...configData, attempts: Math.max(1, parseInt(e.target.value) || 1) })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Failure Handling Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Failure Handling
+                      </h4>
+                      <div className="space-y-4 pl-6">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.retry_on_failure}
+                            onChange={(e) => setConfigData({ ...configData, retry_on_failure: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Retry on Failure</span>
+                        </label>
+                        {configData.retry_on_failure && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                                Max Retries
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={configData.max_retries}
+                                onChange={(e) => setConfigData({ ...configData, max_retries: Math.max(0, parseInt(e.target.value) || 0) })}
+                                disabled={isConfigLocked}
+                                className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                                style={{ 
+                                  color: 'var(--ops-text-primary)',
+                                  opacity: isConfigLocked ? 0.6 : 1
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                                On Failure Action
+                              </label>
+                              <select
+                                value={configData.on_failure_action}
+                                onChange={(e) => setConfigData({ ...configData, on_failure_action: e.target.value as 'pause' | 'stop' | 'notify' })}
+                                disabled={isConfigLocked}
+                                className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                                style={{ 
+                                  color: 'var(--ops-text-primary)',
+                                  opacity: isConfigLocked ? 0.6 : 1
+                                }}
+                              >
+                                <option value="pause">Pause</option>
+                                <option value="stop">Stop</option>
+                                <option value="notify">Notify</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Default Control Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Default Control
+                      </h4>
+                      <div className="pl-6">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.is_active_default}
+                            onChange={(e) => setConfigData({ ...configData, is_active_default: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <div>
+                            <span className="text-sm font-medium" style={{ color: 'var(--ops-text-primary)' }}>Set as Default</span>
+                            <p className="text-xs mt-1" style={{ color: 'var(--ops-text-secondary)' }}>
+                              Only one default configuration can be active per client.
+                            </p>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* MODE 2: Campaign Configuration */}
+                {configMode === 'campaign' && configData && 'locked_at' in configData && (
+                  <>
+                    {/* Config Source Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Config Source
+                      </h4>
+                      <div className="space-y-3 pl-6">
+                        {configData.default_config_id && (
+                          <div className="p-3 rounded-lg glass-input">
+                            <div className="text-xs font-medium mb-1" style={{ color: 'var(--ops-text-secondary)' }}>
+                              Default Config Used
+                            </div>
+                            <div className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
+                              Config ID: {configData.default_config_id}
+                            </div>
+                          </div>
+                        )}
+                        {configData.created_at && (
+                          <div className="p-3 rounded-lg glass-input">
+                            <div className="text-xs font-medium mb-1" style={{ color: 'var(--ops-text-secondary)' }}>
+                              Created At
+                            </div>
+                            <div className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>
+                              {new Date(configData.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Execution Behavior Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Execution Behavior
+                      </h4>
+                      <div className="space-y-3 pl-6">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.enable_disposition}
+                            onChange={(e) => setConfigData({ ...configData, enable_disposition: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Disposition</span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.enable_data_cleanup}
+                            onChange={(e) => setConfigData({ ...configData, enable_data_cleanup: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Data Cleanup</span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.enable_next_iteration}
+                            onChange={(e) => setConfigData({ ...configData, enable_next_iteration: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Enable Next Iteration</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Priorities Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Priorities
+                      </h4>
+                      <div className="grid grid-cols-2 gap-4 pl-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Campaign Priority
+                          </label>
+                          <select
+                            value={configData.campaign_priority}
+                            onChange={(e) => setConfigData({ ...configData, campaign_priority: e.target.value as 'low' | 'medium' | 'high' })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Disposition Priority
+                          </label>
+                          <select
+                            value={configData.disposition_priority}
+                            onChange={(e) => setConfigData({ ...configData, disposition_priority: e.target.value as 'low' | 'medium' | 'high' })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Processing Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Processing
+                      </h4>
+                      <div className="pl-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                            Chunk Size
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={configData.chunk_size}
+                            onChange={(e) => setConfigData({ ...configData, chunk_size: Math.max(1, parseInt(e.target.value) || 100) })}
+                            disabled={isConfigLocked}
+                            className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                            style={{ 
+                              color: 'var(--ops-text-primary)',
+                              opacity: isConfigLocked ? 0.6 : 1
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Failure Handling Section */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                        <ChevronRight className="w-4 h-4" />
+                        Failure Handling
+                      </h4>
+                      <div className="space-y-4 pl-6">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configData.retry_on_failure}
+                            onChange={(e) => setConfigData({ ...configData, retry_on_failure: e.target.checked })}
+                            disabled={isConfigLocked}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm" style={{ color: 'var(--ops-text-primary)' }}>Retry on Failure</span>
+                        </label>
+                        {configData.retry_on_failure && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                                Max Retries
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={configData.max_retries}
+                                onChange={(e) => setConfigData({ ...configData, max_retries: Math.max(0, parseInt(e.target.value) || 0) })}
+                                disabled={isConfigLocked}
+                                className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                                style={{ 
+                                  color: 'var(--ops-text-primary)',
+                                  opacity: isConfigLocked ? 0.6 : 1
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--ops-text-primary)' }}>
+                                On Failure Action
+                              </label>
+                              <select
+                                value={configData.on_failure_action}
+                                onChange={(e) => setConfigData({ ...configData, on_failure_action: e.target.value as 'pause' | 'stop' | 'notify' })}
+                                disabled={isConfigLocked}
+                                className="glass-input w-full px-3 py-2 rounded-lg transition-all"
+                                style={{ 
+                                  color: 'var(--ops-text-primary)',
+                                  opacity: isConfigLocked ? 0.6 : 1
+                                }}
+                              >
+                                <option value="pause">Pause</option>
+                                <option value="stop">Stop</option>
+                                <option value="notify">Notify</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Data Scope Section */}
+                    {configData.data_scope && (
+                      <div>
+                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--ops-text-primary)' }}>
+                          <ChevronRight className="w-4 h-4" />
+                          Data Scope
+                        </h4>
+                        <div className="pl-6">
+                          <div className="p-3 rounded-lg glass-input">
+                            <pre className="text-xs overflow-auto max-h-40" style={{ color: 'var(--ops-text-primary)' }}>
+                              {JSON.stringify(configData.data_scope, null, 2)}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Footer Actions */}
+                {!isConfigLocked && (
+                  <div className="flex gap-3 pt-4 border-t sticky bottom-0 bg-inherit pb-2" style={{ borderColor: 'var(--ops-border)' }}>
+                    <button
+                      onClick={() => setShowConfigModal(false)}
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border transition-all"
+                      style={{ 
+                        borderColor: 'var(--ops-border)',
+                        color: 'var(--ops-text-primary)',
+                        background: 'transparent'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--ops-bg-surface)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (configMode === 'default' && configData && 'is_active_default' in configData && configData.is_active_default) {
+                          if (confirm('Setting this as default will deactivate other default configs. Continue?')) {
+                            // Save logic here
+                            console.log('Saving config:', configData);
+                            setShowConfigModal(false);
+                          }
+                        } else {
+                          // Save logic here
+                          console.log('Saving config:', configData);
+                          setShowConfigModal(false);
+                        }
+                      }}
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                      style={{ 
+                        background: 'var(--ops-accent-campaign)',
+                        color: 'white'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
+                      onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
+
+                {isConfigLocked && (
+                  <div className="flex gap-3 pt-4 border-t sticky bottom-0 bg-inherit pb-2" style={{ borderColor: 'var(--ops-border)' }}>
+                    <button
+                      onClick={() => setShowConfigModal(false)}
+                      className="w-full px-4 py-2 rounded-lg text-sm font-medium border transition-all"
+                      style={{ 
+                        borderColor: 'var(--ops-border)',
+                        color: 'var(--ops-text-primary)',
+                        background: 'transparent'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--ops-bg-surface)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      Close
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </>

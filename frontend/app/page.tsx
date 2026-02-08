@@ -1024,7 +1024,7 @@ export default function Home() {
           <div className="flex items-center justify-between flex-wrap mb-2">
             <div className="flex items-center gap-4 flex-wrap">
               <h1 className="text-3xl font-bold text-[var(--foreground)]">
-                Campaign Management Dashboard
+                Campaign Management System
               </h1>
             
             {/* Persistent Filters - Inline with title (Client only) */}
@@ -1060,9 +1060,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <p className="text-[var(--secondary)]">
-            Filter and analyze campaign data with advanced controls
-          </p>
+          
         </div>
 
         {/* Tab Content */}

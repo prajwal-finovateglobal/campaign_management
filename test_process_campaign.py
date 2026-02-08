@@ -234,8 +234,8 @@ async def main():
             try:
                 # Process the campaign
                 success, message = await process_campaign(db, job.campaign_id)
-                
-                if success:
+
+        if success:
                     logger.info(f"✅ Campaign {job.campaign_id} processed successfully: {message}")
                     successful += 1
                     results.append({
@@ -244,7 +244,7 @@ async def main():
                         'status': 'success',
                         'message': message
                     })
-                else:
+        else:
                     logger.error(f"❌ Campaign {job.campaign_id} failed: {message}")
                     failed += 1
                     results.append({

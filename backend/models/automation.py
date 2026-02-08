@@ -190,6 +190,7 @@ class DataManager(Base):
     client_id = Column(BigInteger, nullable=False)
     campaign_id = Column(BigInteger, nullable=False)
     status = Column(String(20), nullable=False)  # queue, running, completed, failed
+    priority = Column(Integer, nullable=False, default=0)
     action = Column(String(10), nullable=False, default='run')  # run, pause, stop
     processed_steps = Column(Integer, nullable=False, default=0)
     total_steps = Column(Integer, nullable=True)
