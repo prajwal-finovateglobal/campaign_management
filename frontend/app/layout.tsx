@@ -14,7 +14,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Campaign Management Dashboard",
+  title: "Campaign Management System",
   description: "Professional campaign data management and analytics",
 };
 

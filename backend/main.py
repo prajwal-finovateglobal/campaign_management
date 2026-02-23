@@ -17,6 +17,7 @@ from router.translation import router as translation_router
 from router.auth import router as auth_router, is_session_valid
 from router.inbound import router as inbound_router
 from router.table_config import router as table_config_router
+from router.auto_run_router import router as auto_run_router
 
 # Import all models at startup to ensure SQLAlchemy can resolve relationships
 # This must happen before any queries are executed
@@ -121,6 +122,7 @@ app.include_router(disposition_router)
 app.include_router(translation_router)
 app.include_router(inbound_router)
 app.include_router(table_config_router, prefix="/table-config", tags=["table-config"])
+app.include_router(auto_run_router)
 
 @app.get("/")
 def read_root():

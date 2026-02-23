@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from service.csv_service import append_to_csv, get_existing_columns, clear_csv, read_csv_data, set_campaign_id, get_unique_campaign_ids, format_phone_numbers, upload_csv_file, cut_ccd, delete_csv_records, update_csv_records
-from schema.csv import LoadDataRequest, LoadDataResponse, DeletePCDResponse, GetCSVDataResponse, SetCampaignIdRequest, SetCampaignIdResponse, GetCampaignIdsResponse, FormatPhoneNumbersResponse, UploadCSVResponse, CutCCDRequest, CutCCDResponse, DeleteCSVRecordsRequest, DeleteCSVRecordsResponse, UpdateCSVRecordsRequest, UpdateCSVRecordsResponse, AddCSVRecordsRequest, AddCSVRecordsResponse
+from schema.csv import LoadDataRequest, LoadDataResponse, LoadSDTCQueryRequest, DeletePCDResponse, GetCSVDataResponse, SetCampaignIdRequest, SetCampaignIdResponse, GetCampaignIdsResponse, FormatPhoneNumbersResponse, UploadCSVResponse, CutCCDRequest, CutCCDResponse, DeleteCSVRecordsRequest, DeleteCSVRecordsResponse, UpdateCSVRecordsRequest, UpdateCSVRecordsResponse, AddCSVRecordsRequest, AddCSVRecordsResponse
+from database.dependencies import DB_DEPENDENCY
 from typing import Optional
 import loguru
 
@@ -51,6 +52,81 @@ def load_sdtc(request: LoadDataRequest):
         message=f"Successfully loaded {len(request.data)} rows to data.csv",
         rows_added=len(request.data),
         expected_columns=list(existing_columns) if existing_columns else list(request.data[0].keys())
+    )
+
+
+@router.post("/load_sdtc_query", response_model=LoadDataResponse)
+def load_sdtc_query(request: LoadSDTCQueryRequest, db: DB_DEPENDENCY):
+    """
+    Load data directly from the database into data.csv using filter params.
+    Runs the full filter query (no pagination), selects only the requested
+    columns, and appends to data.csv — same result as Load SDTC but without
+    the frontend needing to hold all rows in memory.
+    """
+    from schema.tables import ShowDataRequest
+    from service.filter_services import filter_data
+    import json
+
+    if not request.selected_columns:
+        raise HTTPException(status_code=400, detail="selected_columns cannot be empty")
+
+    # Build a ShowDataRequest from the filter params, fetching all rows at once
+    show_request = ShowDataRequest(
+        start_time=request.start_time,
+        end_time=request.end_time,
+        con_status=request.con_status,
+        direction=request.direction,
+        language=request.language,
+        duration=request.duration,
+        duration_min=request.duration_min,
+        duration_max=request.duration_max,
+        client_id=request.client_id,
+        table_name=request.table_name,
+        phase_id=request.phase_id,
+        campaign_id=request.campaign_id,
+        campaign_ids=request.campaign_ids,
+        page=1,
+        page_size=10_000_000,  # effectively no pagination
+    )
+
+    result_dicts, total_count = filter_data(db, show_request)
+    logger.info(f"load_sdtc_query: {total_count} total rows, loading to CSV with columns {request.selected_columns}")
+
+    if total_count == 0:
+        raise HTTPException(status_code=400, detail="No records match the given filters")
+
+    # Column-filter and convert objects/arrays to JSON strings (same as frontend did)
+    selected_cols = request.selected_columns
+    data_to_write = []
+    for row in result_dicts:
+        filtered_row: dict = {}
+        for col in selected_cols:
+            value = row.get(col)
+            if value is not None and isinstance(value, (dict, list)):
+                filtered_row[col] = json.dumps(value)
+            else:
+                filtered_row[col] = value
+        data_to_write.append(filtered_row)
+
+    existing_columns = get_existing_columns()
+    success, error_msg = append_to_csv(data_to_write)
+
+    if not success:
+        expected_cols = list(existing_columns) if existing_columns else []
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": error_msg,
+                "expected_columns": expected_cols,
+                "received_columns": selected_cols,
+            },
+        )
+
+    return LoadDataResponse(
+        success=True,
+        message=f"Successfully loaded {len(data_to_write)} rows to data.csv",
+        rows_added=len(data_to_write),
+        expected_columns=list(existing_columns) if existing_columns else selected_cols,
     )
 
 

@@ -1,4 +1,4 @@
-# Frontend - Campaign Management Dashboard
+# Frontend - Campaign Management System
 
 Next.js 14 frontend application for managing campaigns, data, and disposition trees.
 

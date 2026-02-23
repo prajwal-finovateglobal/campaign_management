@@ -13,7 +13,8 @@ from repo.filters import (
     filter_by_language,
     filter_by_duration,
     filter_by_phase_id,
-    filter_by_campaign_ids
+    filter_by_campaign_ids,
+    filter_by_search,
 )
 from schema.tables import ShowDataRequest
 import loguru
@@ -91,7 +92,7 @@ def convert_query_results_to_dicts(results: List, columns: List[str]) -> List[Di
     return result_list
 
 
-def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, Any]]:
+def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> tuple[List[Dict[str, Any]], int]:
     """
     Filter data from DataLog table using query builder pattern.
     All filtering happens at database level - no pandas needed.
@@ -123,6 +124,10 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     phase_id = request.phase_id
     campaign_id = request.campaign_id
     campaign_ids = request.campaign_ids  # IMPORTANT: Extract from request object
+    search_column = request.search_column
+    search_value = request.search_value
+    page = max(1, request.page)
+    page_size = max(1, request.page_size)
     
     logger.info(f"Extracted campaign_ids variable: {campaign_ids} (type: {type(campaign_ids)})")
     logger.info(f"Extracted campaign_id variable: {campaign_id}")
@@ -182,7 +187,7 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     # Validate query was created successfully
     if query is None:
         logger.error("Failed to create query object")
-        return []
+        return [], 0
     
     # Stack filters (still NOT executed)
     logger.info(f"=== Starting filter chain ===")
@@ -190,31 +195,31 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     query = filter_by_date_range(query, start_time, end_time)
     if query is None:
         logger.error("ERROR: filter_by_date_range returned None!")
-        return []
+        return [], 0
     logger.info(f"Query after date_range filter: {query is not None}")
     
     query = filter_by_connected_status(query, con_status)
     if query is None:
         logger.error("ERROR: filter_by_connected_status returned None!")
-        return []
+        return [], 0
     logger.info(f"Query after connected_status filter: {query is not None}")
     
     query = filter_by_direction(query, direction)
     if query is None:
         logger.error("ERROR: filter_by_direction returned None!")
-        return []
+        return [], 0
     logger.info(f"Query after direction filter: {query is not None}")
     
     query = filter_by_language(query, language)
     if query is None:
         logger.error("ERROR: filter_by_language returned None!")
-        return []
+        return [], 0
     logger.info(f"Query after language filter: {query is not None}")
     
     query = filter_by_duration(query, duration, duration_min, duration_max)
     if query is None:
         logger.error("ERROR: filter_by_duration returned None!")
-        return []
+        return [], 0
     logger.info(f"Query after duration filter: {query is not None}")
     
     # Before phase_id filter, check campaign counts for diagnostics
@@ -293,11 +298,15 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     # Apply campaign filter using campaign_ids (always uses IN clause)
     query = filter_by_campaign_ids(query, campaign_ids=final_campaign_ids)
     logger.info(f"Query after campaign_ids filter: {query is not None}")
-    
+
+    # Apply search filter (DB-level case-insensitive contains)
+    query = filter_by_search(query, search_column, search_value)
+    logger.info(f"Query after search filter: {query is not None}")
+
     # Validate query is still valid after filtering
     if query is None:
         logger.error("Query became None after applying filters")
-        return []
+        return [], 0
     
     # Execute query - this is where database query actually runs
     # Log the SQL query for debugging
@@ -307,40 +316,38 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     except Exception as e:
         logger.warning(f"Could not compile query SQL: {e}")
     
-    # Check query count before executing
-    count_before = None
+    # Get total count (used for pagination) before applying LIMIT/OFFSET
+    total_count = 0
     try:
-        count_before = query.count()
-        logger.info(f"Query count (before all()): {count_before} rows")
+        total_count = query.count()
+        logger.info(f"Total matching rows (before pagination): {total_count}")
     except Exception as e:
-        # Use % formatting to avoid KeyError when error message contains braces
         logger.warning("Could not get query count: %s", str(e))
-        # Rollback if count fails to prevent transaction from being in bad state
         try:
             db.rollback()
             logger.info("Transaction rolled back after count query failed")
         except Exception as rollback_error:
             logger.error("Error during rollback after count failure: %s", str(rollback_error))
-        # Don't fail the whole request if count fails, just log it
-        # The actual query execution will show the real error
     
-    # Execute query with error handling
+    # Apply pagination
+    offset = (page - 1) * page_size
+    paginated_query = query.offset(offset).limit(page_size)
+    logger.info(f"Pagination: page={page}, page_size={page_size}, offset={offset}")
+
+    # Execute paginated query with error handling
     try:
-        results = query.all()
-        logger.info(f"Query executed: {len(results)} rows returned")
+        results = paginated_query.all()
+        logger.info(f"Query executed: {len(results)} rows returned (page {page} of {-(-total_count // page_size) if page_size else 1})")
     except Exception as e:
-        # Use % formatting to avoid KeyError when error message contains braces
         logger.error("Error executing query: %s", str(e), exc_info=True)
-        # Rollback transaction on error (dependency will also rollback, but this is safe)
         try:
             db.rollback()
             logger.info("Transaction rolled back due to query execution error")
         except Exception as rollback_error:
             logger.error("Error during rollback: %s", str(rollback_error))
-        # Re-raise to let the dependency handler catch it
         raise
     
-    if len(results) == 0:
+    if total_count == 0:
         logger.warning("=== NO DATA RETURNED ===")
         logger.warning("Possible reasons:")
         logger.warning("1. No data matches all the filters")
@@ -349,7 +356,6 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
         logger.warning("4. Phase filter: No records have campaign_id matching campaigns with phase_id={phase_id}")
         logger.warning("5. Other filters (direction, language, duration) are too restrictive")
         
-        # Try to diagnose: check if there's data without filters
         try:
             if client_id is not None:
                 from repo.tables import get_base_query_for_client
@@ -359,7 +365,6 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
                     logger.info(f"Total rows in table (no filters): {base_count}")
         except Exception as e:
             logger.warning("Could not check base count: %s", str(e))
-            # Rollback on error to prevent transaction from being in bad state
             try:
                 db.rollback()
                 logger.info("Transaction rolled back after base count query failed")
@@ -369,5 +374,5 @@ def filter_data(db: DB_DEPENDENCY, request: ShowDataRequest) -> List[Dict[str, A
     # Convert results to dictionaries with human-readable datetime
     result_dicts = convert_query_results_to_dicts(results, columns)
     
-    logger.info(f"Total rows returned: {len(result_dicts)}")
-    return result_dicts
+    logger.info(f"Rows in current page: {len(result_dicts)} | Total: {total_count}")
+    return result_dicts, total_count

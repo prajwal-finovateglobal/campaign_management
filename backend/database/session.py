@@ -26,8 +26,10 @@ Base = declarative_base()
 
 # Set timezone to Asia/Kolkata for all connections
 engine = create_engine(
-    DB_URL, 
+    DB_URL,
     echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,
     connect_args={
         "options": "-c timezone=Asia/Kolkata"
     }

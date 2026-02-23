@@ -80,5 +80,10 @@ class Chunk(Base):
     agent_id = Column(String, nullable=True)  # Agent ID from Millis.ai
     upload_status = Column(String, nullable=True)  # Upload status: 'done' or null
 
+    # Auto-run loop progress (completely separate from Millis.ai status above)
+    # Written only by auto_run_service — never by existing chunk/campaign logic
+    auto_run_status  = Column(String(30), nullable=True)  # pending|starting|started|waiting_finish|countdown|finished|failed
+    auto_run_message = Column(Text, nullable=True)         # human-readable progress message for UI
+
     # Relationships
     campaign = relationship('Campaign', back_populates='chunks')

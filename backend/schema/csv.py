@@ -13,6 +13,30 @@ class LoadDataResponse(BaseModel):
     expected_columns: Optional[List[str]] = None
 
 
+class LoadSDTCQueryRequest(BaseModel):
+    """
+    Request to load data directly from the database into data.csv
+    using the same filter params as /show_data, plus a list of
+    columns to include. No pagination — always fetches all matching rows.
+    """
+    # Filter params (mirrors ShowDataRequest)
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    con_status: Optional[bool] = None
+    direction: Optional[str] = None
+    language: Optional[str] = None
+    duration: Optional[float] = None
+    duration_min: Optional[float] = None
+    duration_max: Optional[float] = None
+    client_id: Optional[int] = None
+    table_name: Optional[str] = None
+    phase_id: Optional[int] = None
+    campaign_id: Optional[int] = None
+    campaign_ids: Optional[List[int]] = None
+    # Column selection
+    selected_columns: List[str]
+
+
 class DeletePCDResponse(BaseModel):
     success: bool
     message: str

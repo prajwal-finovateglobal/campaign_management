@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database, Play, Clock, XCircle, Network, FileText, BarChart, Info } from 'lucide-react';
+import { Loader2, Search, ChevronDown, CheckCircle2, RefreshCw, Trash2, X, Upload, ToggleLeft, ToggleRight, AlertTriangle, Database, Play, Pause, Clock, XCircle, Network, FileText, BarChart, Info } from 'lucide-react';
 import { DataTable } from './DataTable';
 import { api } from '@/lib/api';
 import { batchRequests } from '@/lib/batchRequest';
@@ -236,15 +236,49 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     campaign: Campaign | null;
   }>({ show: false, campaign: null });
   const [autoStartChunks, setAutoStartChunks] = useState<any[]>([]);
-  const [autoStartGap, setAutoStartGap] = useState<number>(30); // seconds between chunks
-  const [isAutoStarting, setIsAutoStarting] = useState(false);
-  const [shouldStopAutoStart, setShouldStopAutoStart] = useState(false);
-  const shouldStopAutoStartRef = useRef(false); // Ref for synchronous access in async functions
-  const [autoStartProgress, setAutoStartProgress] = useState<Record<number, {
-    status: 'pending' | 'starting' | 'started' | 'waiting_finish' | 'finished' | 'countdown' | 'failed';
-    message: string;
-    countdown?: number;
-  }>>({});
+  const [autoStartGap, setAutoStartGap] = useState<number>(20); // seconds between chunks
+  // Daily IST time window — empty string = no restriction
+  const [autoTimeWindow, setAutoTimeWindow] = useState<{ start: string; end: string }>({
+    start: '09:30',
+    end: '19:30',
+  });
+  const [autoRunStatus, setAutoRunStatus] = useState<{
+    status: string;           // idle|running|paused|scheduled|stopped|completed
+    action: string;           // run|pause|stop
+    is_running: boolean;
+    gap_seconds: number;
+    current_chunk_index: number;
+    total_chunks: number;
+    chunk_progress: Array<{
+      chunk_id: number;
+      chunk_name: string;
+      status: string;         // pending|starting|started|waiting_finish|countdown|finished|failed
+      message: string;
+      millis_status: string | null;
+    }>;
+    start_time: string | null;
+    end_time: string | null;
+    next_resume_at: string | null;
+    started_at: string | null;
+    ended_at: string | null;
+  } | null>(null);
+  const autoRunPollingRef          = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingInFlightRef         = useRef(false); // guard: skip tick if previous request is still in flight
+  const timeWindowInitializedRef   = useRef(false); // true after first status fetch seeds the time-window inputs
+  // Derived — replaces the old isAutoStarting state variable
+  const isAutoStarting  = autoRunStatus?.is_running === true;
+  const isAutoPaused    = autoRunStatus?.status === 'paused';
+  const isAutoScheduled = autoRunStatus?.status === 'scheduled';
+
+  // Both times must be set and start must be strictly before end
+  const timeWindowError: string | null = (() => {
+    const { start, end } = autoTimeWindow;
+    if (!start && !end) return null;              // blank = no restriction, fine
+    if (start && !end) return 'Please set an end time.';
+    if (!start && end) return 'Please set a start time.';
+    if (start > end)   return 'Start time cannot be greater than end time.';
+    return null;
+  })();
   const [startingIndividualChunk, setStartingIndividualChunk] = useState<number | null>(null);
   const [refreshingChunkStatuses, setRefreshingChunkStatuses] = useState(false);
   
@@ -252,7 +286,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
   const [checkingLaunchStatus, setCheckingLaunchStatus] = useState(false);
   const [launchStatusMessage, setLaunchStatusMessage] = useState<{ type: 'success' | 'error' | null; text: string }>({ type: null, text: '' });
   
-  // Upload metadata states
+  // Upload metadata statesv
   const [uploadMetadataEnabled, setUploadMetadataEnabled] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadingCSV, setUploadingCSV] = useState(false);
@@ -660,7 +694,11 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
           const chunks = result.chunks || [];
           setAutoStartChunks(chunks);
           setAutoStartModal({ show: true, campaign });
-          setAutoStartProgress({});
+          setAutoRunStatus(null);
+          // Reset time-window inputs to defaults; first poll will overwrite with DB values if present
+          setAutoTimeWindow({ start: '09:30', end: '19:30' });
+          timeWindowInitializedRef.current = false;
+          startPollingAutoRun(campaign.id);
           
           // Automatically refresh all chunk statuses when modal opens
           console.log('[OPEN_MODAL] Auto-refreshing chunk statuses...');
@@ -937,398 +975,139 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
     }
   };
 
-  // Function to poll chunk status until it becomes "finished"
-  const pollChunkStatus = async (chunkId: number): Promise<string> => {
-    const maxAttempts = 1000; // Max polling attempts (1000 * 10s = ~166 minutes max)
-    const pollInterval = 10000; // 10 seconds (faster status updates)
-    
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      // Check if user requested to stop
-      if (shouldStopAutoStartRef.current) {
-        console.log(`[POLL_STATUS] Stop requested by user, aborting poll for chunk ${chunkId}`);
-        throw new Error('Auto-start stopped by user');
+  // ─── Auto-Run Polling & Control ─────────────────────────────────────────────
+
+  // Tracks how many polls have fired — used to throttle the chunk-list refresh
+  const pollCountRef = useRef(0);
+
+  const fetchAutoRunStatus = async (campaignId: number) => {
+    if (pollingInFlightRef.current) return; // skip if a request is already in flight
+    pollingInFlightRef.current = true;
+    try {
+      const res = await api.get(`/auto-run/status/${campaignId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAutoRunStatus(data);
+
+        // On the very first poll after the modal opens, seed the time-window
+        // inputs from the DB. If DB is null, keep the defaults (09:30 / 19:30).
+        if (!timeWindowInitializedRef.current) {
+          timeWindowInitializedRef.current = true;
+          if (data.start_time && data.end_time) {
+            setAutoTimeWindow({ start: data.start_time, end: data.end_time });
+          }
+        }
+
+        // Every 5 polls (~15 s) also refresh autoStartChunks so the Status
+        // column (Millis status) stays live without hammering the API.
+        pollCountRef.current += 1;
+        if (pollCountRef.current % 5 === 0) {
+          const chunksRes = await api.get(`/chunk/campaign/${campaignId}`);
+          if (chunksRes.ok) {
+            const chunksData = await chunksRes.json();
+            setAutoStartChunks(chunksData.chunks || []);
+          }
+        }
+
+        // Stop polling only when the loop has genuinely finished.
+        // 'idle' alone is NOT enough — user may be about to click start.
+        const trulyDone =
+          !data.is_running &&
+          (data.status === 'completed' ||
+           data.status === 'stopped' ||
+           (data.status === 'running' && !data.is_running));   // auto-heal case
+        if (trulyDone) {
+          stopPollingAutoRun();
+        }
       }
-      
-      try {
-        const response = await api.get(`/chunk/${chunkId}/status`);
-        
-        if (response.ok) {
-          const result = await response.json();
-          console.log(`[POLL_STATUS] Chunk ${chunkId} status: ${result.status} (attempt ${attempt + 1})`);
-          
-          if (result.status === 'finished') {
-            console.log(`[POLL_STATUS] ✓ Chunk ${chunkId} finished!`);
-            return 'finished';
-          }
-          
-          // Update progress message with waiting time
-          const elapsedSeconds = (attempt + 1) * (pollInterval / 1000);
-          setAutoStartProgress(prev => ({
-            ...prev,
-            [chunkId]: {
-              ...prev[chunkId],
-              message: `Waiting for chunk to finish... (status: ${result.status}, elapsed: ${elapsedSeconds}s)`
-            }
-          }));
-          
-          // Wait before next poll (10 seconds) - check stop flag periodically during wait
-          for (let waitCount = 0; waitCount < pollInterval / 1000; waitCount++) {
-            if (shouldStopAutoStartRef.current) {
-              console.log(`[POLL_STATUS] Stop requested by user during wait, aborting poll for chunk ${chunkId}`);
-              throw new Error('Auto-start stopped by user');
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second at a time
-          }
-        } else {
-          console.error(`[POLL_STATUS] Failed to fetch status for chunk ${chunkId}`);
-          // Check stop flag before waiting
-          if (shouldStopAutoStartRef.current) {
-            console.log(`[POLL_STATUS] Stop requested by user, aborting poll for chunk ${chunkId}`);
-            throw new Error('Auto-start stopped by user');
-          }
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-        }
-      } catch (error: any) {
-        // If it's a stop error, re-throw it
-        if (error.message === 'Auto-start stopped by user') {
-          throw error;
-        }
-        console.error(`[POLL_STATUS] Error polling chunk ${chunkId}:`, error);
-        // Check stop flag before waiting
-        if (shouldStopAutoStartRef.current) {
-          console.log(`[POLL_STATUS] Stop requested by user after error, aborting poll for chunk ${chunkId}`);
-          throw new Error('Auto-start stopped by user');
-        }
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-      }
+    } catch (err) {
+      console.error('[AUTO_RUN] Failed to fetch status', err);
+    } finally {
+      pollingInFlightRef.current = false;
     }
-    
-    throw new Error('Polling timeout: chunk did not finish in expected time');
   };
 
-  // Function to run countdown timer
-  const runCountdown = async (chunkId: number, seconds: number): Promise<void> => {
-    for (let remaining = seconds; remaining > 0; remaining--) {
-      // Check if user requested to stop
-      if (shouldStopAutoStartRef.current) {
-        console.log(`[COUNTDOWN] Stop requested by user, aborting countdown for chunk ${chunkId}`);
-        throw new Error('Auto-start stopped by user');
-      }
-      
-      setAutoStartProgress(prev => ({
-        ...prev,
-        [chunkId]: {
-          status: 'countdown',
-          message: `Next chunk will start in ${remaining} seconds...`,
-          countdown: remaining
-        }
-      }));
-      
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-    }
-    
-    // After countdown completes, update progress to show completion
-    setAutoStartProgress(prev => ({
-      ...prev,
-      [chunkId]: {
-        status: 'finished',
-        message: 'Countdown completed, moving to next chunk'
-      }
-    }));
+  const startPollingAutoRun = (campaignId: number) => {
+    stopPollingAutoRun();
+    pollingInFlightRef.current = false; // reset guard on fresh start
+    pollCountRef.current = 0;           // reset throttle counter
+    fetchAutoRunStatus(campaignId);
+    autoRunPollingRef.current = setInterval(() => fetchAutoRunStatus(campaignId), 3000);
   };
 
-  // Function to handle auto-start of all chunks
+  const stopPollingAutoRun = () => {
+    if (autoRunPollingRef.current) {
+      clearInterval(autoRunPollingRef.current);
+      autoRunPollingRef.current = null;
+    }
+  };
+
   const handleAutoStartChunks = async () => {
     if (!autoStartModal.campaign || autoStartChunks.length === 0) return;
-    
-    console.log('[AUTO_START] Starting auto-start sequence');
-    console.log('[AUTO_START] Gap between chunks:', autoStartGap, 'seconds');
-    console.log('[AUTO_START] Total chunks:', autoStartChunks.length);
-    
-    setIsAutoStarting(true);
-    setShouldStopAutoStart(false);
-    shouldStopAutoStartRef.current = false; // Reset ref
-    
-    // 🔔 Send "Campaign Started" notification to GChat
+    if (!selectedClientId) { alert('No client selected'); return; }
+    if (timeWindowError) { alert(timeWindowError); return; }
     try {
-      console.log('[AUTO_START] Sending campaign started notification...');
-      const notifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/started`);
-      if (notifResponse.ok) {
-        console.log('[AUTO_START] ✅ Campaign started notification sent to GChat');
+      const res = await api.post('/auto-run/start', {
+        campaign_id: autoStartModal.campaign.id,
+        client_id:   selectedClientId,
+        gap_seconds: autoStartGap,
+        // start == end means 24×7 (no restriction) — send null for both
+        start_time:  (autoTimeWindow.start && autoTimeWindow.start !== autoTimeWindow.end) ? autoTimeWindow.start : null,
+        end_time:    (autoTimeWindow.end   && autoTimeWindow.start !== autoTimeWindow.end) ? autoTimeWindow.end   : null,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || 'Failed to start auto-run');
+        return;
       }
-    } catch (notifError) {
-      console.error('[AUTO_START] Failed to send started notification:', notifError);
-    }
-    
-    try {
-      let stoppedByUser = false;
-      
-      for (let i = 0; i < autoStartChunks.length; i++) {
-        // Check if user requested to stop (check both state and ref)
-        if (shouldStopAutoStartRef.current || shouldStopAutoStart) {
-          console.log('[AUTO_START] Stop requested by user, terminating auto-start...');
-          stoppedByUser = true;
-          alert('Auto-start stopped by user');
-          break;
-        }
-        
-        const chunk = autoStartChunks[i];
-        console.log(`\n[AUTO_START] Processing chunk ${i + 1}/${autoStartChunks.length}: ${chunk.chunk_name}`);
-        
-        // Initialize progress for this chunk
-        setAutoStartProgress(prev => ({
-          ...prev,
-          [chunk.id]: {
-            status: 'pending',
-            message: `Checking chunk status...`
-          }
-        }));
-        
-        try {
-          // Step 0: Check current chunk status
-          console.log(`[AUTO_START] Step 0: Checking status of chunk ${chunk.id}`);
-          const statusResponse = await api.get(`/chunk/${chunk.id}/status`);
-          
-          if (!statusResponse.ok) {
-            throw new Error('Failed to fetch chunk status');
-          }
-          
-          const statusResult = await statusResponse.json();
-          const currentStatus = statusResult.status;
-          console.log(`[AUTO_START] Current status: ${currentStatus}`);
-          
-          // Decision based on current status
-          if (currentStatus === 'finished') {
-            // Chunk already finished, skip it WITHOUT timer
-            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} is already finished, skipping to next (no timer)...`);
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'finished',
-                message: 'Already finished (skipped, no timer)'
-              }
-            }));
-            
-            // Refresh status before moving to next chunk
-            console.log(`[AUTO_START] Refreshing status before moving to next...`);
-            if (autoStartModal.campaign) {
-              try {
-                const refreshResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
-                if (refreshResponse.ok) {
-                  const refreshResult = await refreshResponse.json();
-                  setAutoStartChunks(refreshResult.chunks || []);
-                }
-              } catch (err) {
-                console.error('[AUTO_START] Error refreshing chunks:', err);
-              }
-            }
-            
-            // NO TIMER - immediately move to next chunk
-            console.log(`[AUTO_START] Moving to next chunk immediately (no countdown)`);
-            continue;
-          }
-          
-          if (currentStatus === 'started') {
-            // Chunk is already started, just wait for it to finish
-            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} is already started, waiting for finish...`);
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'waiting_finish',
-                message: 'Already started, waiting for finish...'
-              }
-            }));
-            
-            // Wait for chunk to finish
-            await pollChunkStatus(chunk.id);
-            
-            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} finished!`);
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'finished',
-                message: 'Chunk finished (no timer - already started)'
-              }
-            }));
-            
-            // Refresh status before moving to next chunk
-            console.log(`[AUTO_START] Refreshing status before moving to next...`);
-            if (autoStartModal.campaign) {
-              try {
-                const refreshResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
-                if (refreshResponse.ok) {
-                  const refreshResult = await refreshResponse.json();
-                  setAutoStartChunks(refreshResult.chunks || []);
-                }
-              } catch (err) {
-                console.error('[AUTO_START] Error refreshing chunks:', err);
-              }
-            }
-            
-            // NO TIMER - didn't go through full cycle (idle→started→finished)
-            // This was already started, so we skip the countdown
-            console.log(`[AUTO_START] Moving to next chunk immediately (no countdown - chunk was already started)`);
-            continue;
-          }
-          
-          if (currentStatus === 'idle') {
-            // Chunk is idle, start it
-            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} is idle, starting...`);
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'starting',
-                message: `Starting chunk ${i + 1}/${autoStartChunks.length}...`
-              }
-            }));
-            
-            // Step 1: Start the chunk
-            console.log(`[AUTO_START] Step 1: Starting chunk ${chunk.id}`);
-            const startResponse = await api.post(`/chunk/${chunk.id}/start`);
-            
-            if (!startResponse.ok) {
-              const errorData = await startResponse.json();
-              throw new Error(errorData.detail || 'Failed to start chunk');
-            }
-            
-            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} started successfully`);
-            
-            // Update status to started
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'started',
-                message: 'Chunk started successfully'
-              }
-            }));
-            
-            // Step 2: Wait for chunk to finish
-            console.log(`[AUTO_START] Step 2: Waiting for chunk ${chunk.id} to finish...`);
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'waiting_finish',
-                message: 'Waiting for chunk to finish...'
-              }
-            }));
-            
-            await pollChunkStatus(chunk.id);
-            
-            console.log(`[AUTO_START] Chunk ${chunk.chunk_name} finished!`);
-            
-            // Update status to finished
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'finished',
-                message: 'Chunk finished (full cycle completed)'
-              }
-            }));
-            
-            // Refresh status before countdown/moving to next chunk
-            console.log(`[AUTO_START] Refreshing status before moving to next...`);
-            if (autoStartModal.campaign) {
-              try {
-                const refreshResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
-                if (refreshResponse.ok) {
-                  const refreshResult = await refreshResponse.json();
-                  setAutoStartChunks(refreshResult.chunks || []);
-                  console.log(`[AUTO_START] ✓ Status refreshed`);
-                }
-              } catch (err) {
-                console.error('[AUTO_START] Error refreshing chunks:', err);
-              }
-            }
-            
-            // Step 3: Countdown before next chunk (if not the last chunk)
-            // Timer runs because chunk went through FULL CYCLE: idle → started → finished
-            if (i < autoStartChunks.length - 1) {
-              console.log(`[AUTO_START] Step 3: Full cycle completed (idle→started→finished), countdown for ${autoStartGap} seconds`);
-              await runCountdown(chunk.id, autoStartGap);
-              // Small delay to show the completion message before moving to next chunk
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
-          } else {
-            // Unknown status, skip with warning
-            console.warn(`[AUTO_START] Chunk ${chunk.chunk_name} has unexpected status: ${currentStatus}, skipping...`);
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'failed',
-                message: `Unexpected status: ${currentStatus} (skipped)`
-              }
-            }));
-          }
-          
-        } catch (error: any) {
-          // Check if this is a user-initiated stop
-          if (error.message === 'Auto-start stopped by user') {
-            console.log('[AUTO_START] User stopped auto-start, breaking loop');
-            setAutoStartProgress(prev => ({
-              ...prev,
-              [chunk.id]: {
-                status: 'failed',
-                message: 'Stopped by user'
-              }
-            }));
-            break; // Break out of the loop without asking user
-          }
-          
-          console.error(`[AUTO_START] Error with chunk ${chunk.chunk_name}:`, error);
-          setAutoStartProgress(prev => ({
-            ...prev,
-            [chunk.id]: {
-              status: 'failed',
-              message: `Failed: ${error.message}`
-            }
-          }));
-          
-          // Ask user if they want to continue
-          const continueNext = confirm(`Chunk ${chunk.chunk_name} failed: ${error.message}\n\nContinue with next chunk?`);
-          if (!continueNext) {
-            break;
-          }
-        }
-      }
-      
-      // Only show completion message if we didn't stop early
-      if (!shouldStopAutoStartRef.current && !stoppedByUser) {
-        console.log('[AUTO_START] Auto-start sequence completed');
-        
-        // 🔔 Send "Campaign Completed" notification to GChat BEFORE the alert
-        try {
-          console.log('[AUTO_START] Sending campaign completed notification...');
-          const completeNotifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/completed`);
-          if (completeNotifResponse.ok) {
-            console.log('[AUTO_START] ✅ Campaign completed notification sent to GChat');
-          }
-        } catch (completeError) {
-          console.error('[AUTO_START] Failed to send completed notification:', completeError);
-        }
-        
-        alert('Auto-start sequence completed!');
-      } else {
-        console.log('[AUTO_START] Auto-start sequence stopped by user');
-      }
-      
-      // Refresh chunks
-      if (autoStartModal.campaign) {
-        const chunksResponse = await api.get(`/chunk/campaign/${autoStartModal.campaign.id}`);
-        if (chunksResponse.ok) {
-          const chunksResult = await chunksResponse.json();
-          setAutoStartChunks(chunksResult.chunks || []);
-        }
-      }
-      
-    } catch (error: any) {
-      console.error('[AUTO_START] Fatal error:', error);
-      alert(`Auto-start failed: ${error.message}`);
-    } finally {
-      setIsAutoStarting(false);
-      setShouldStopAutoStart(false);
-      shouldStopAutoStartRef.current = false; // Reset ref
+      // Restart the polling interval — it may have been stopped earlier
+      // (e.g. modal was opened while campaign was idle/stopped and
+      // the auto-stop logic killed the interval before start was clicked).
+      startPollingAutoRun(autoStartModal.campaign.id);
+    } catch (err: any) {
+      alert('Failed to start auto-run: ' + err.message);
     }
   };
+
+  const handleStopAutoRun = async () => {
+    if (!autoStartModal.campaign) return;
+    try {
+      const res = await api.post(`/auto-run/stop/${autoStartModal.campaign.id}`);
+      if (res.ok) startPollingAutoRun(autoStartModal.campaign.id);
+    } catch (err) {
+      console.error('[AUTO_RUN] Stop failed', err);
+    }
+  };
+
+  const handlePauseAutoRun = async () => {
+    if (!autoStartModal.campaign) return;
+    try {
+      const res = await api.post(`/auto-run/pause/${autoStartModal.campaign.id}`);
+      if (res.ok) startPollingAutoRun(autoStartModal.campaign.id);
+    } catch (err) {
+      console.error('[AUTO_RUN] Pause failed', err);
+    }
+  };
+
+  const handleResumeAutoRun = async () => {
+    if (!autoStartModal.campaign) return;
+    try {
+      const res = await api.post(`/auto-run/resume/${autoStartModal.campaign.id}`);
+      if (res.ok) {
+        startPollingAutoRun(autoStartModal.campaign.id);
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Failed to resume');
+        startPollingAutoRun(autoStartModal.campaign.id);
+      }
+    } catch (err) {
+      console.error('[AUTO_RUN] Resume failed', err);
+    }
+  };
+
+  // Stop polling when the component unmounts
+  useEffect(() => { return () => stopPollingAutoRun(); }, []);
+
 
   // Function to refresh both campaigns and campaign IDs
   const handleRefresh = async () => {
@@ -4160,28 +3939,11 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 Start Multiple Chunks Campaign: {autoStartModal.campaign.campaign_name}
               </h3>
               <button
-                onClick={async () => {
-                  if (isAutoStarting && autoStartModal.campaign) {
-                    // If auto-start is running, stop it first (same as "Stop Auto Start" button)
-                    console.log('[AUTO_START] Stop requested by user via X button');
-                    setShouldStopAutoStart(true);
-                    shouldStopAutoStartRef.current = true; // Also update ref for immediate access
-                    
-                    // 🔔 Send "Campaign Paused" notification immediately
-                    try {
-                      console.log('[AUTO_START] Sending campaign paused notification (X button)...');
-                      const pauseNotifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/paused`);
-                      if (pauseNotifResponse.ok) {
-                        console.log('[AUTO_START] ✅ Campaign paused notification sent to GChat');
-                      }
-                    } catch (pauseError) {
-                      console.error('[AUTO_START] Failed to send paused notification:', pauseError);
-                    }
-                  }
-                  // Close the modal
+                onClick={() => {
+                  stopPollingAutoRun();
+                  setAutoRunStatus(null);
                   setAutoStartModal({ show: false, campaign: null });
                   setAutoStartChunks([]);
-                  setAutoStartProgress({});
                   setLaunchStatusMessage({ type: null, text: '' });
                 }}
                 className="p-1 hover:bg-[var(--table-row-hover)] rounded transition-colors"
@@ -4202,12 +3964,54 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                     min="0"
                     value={autoStartGap}
                     onChange={(e) => setAutoStartGap(parseInt(e.target.value) || 0)}
-                    disabled={isAutoStarting}
+                    disabled={isAutoStarting || isAutoScheduled}
                     className="w-full px-3 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50"
                   />
                   <p className="text-xs text-[var(--secondary)] mt-1">
                     Time to wait after each chunk finishes before starting the next one
                   </p>
+                </div>
+
+                {/* Daily time-window (IST) */}
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                    Run Window (IST) &nbsp;
+                    <span className="text-[var(--secondary)] font-normal text-xs">optional — leave blank or set equal times to run 24 × 7</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="time"
+                      step="60"
+                      value={autoTimeWindow.start}
+                      onChange={(e) => setAutoTimeWindow(w => ({ ...w, start: e.target.value }))}
+                      disabled={isAutoStarting || isAutoScheduled}
+                      className={`flex-1 px-3 py-2 border rounded-md bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 disabled:opacity-50 text-sm [color-scheme:light] dark:[color-scheme:dark] ${
+                        timeWindowError ? 'border-red-500 focus:ring-red-500' : 'border-[var(--input-border)] focus:ring-[var(--primary)]'
+                      }`}
+                    />
+                    <span className="text-[var(--secondary)] text-xs font-medium">to</span>
+                    <input
+                      type="time"
+                      step="60"
+                      value={autoTimeWindow.end}
+                      onChange={(e) => setAutoTimeWindow(w => ({ ...w, end: e.target.value }))}
+                      disabled={isAutoStarting || isAutoScheduled}
+                      className={`flex-1 px-3 py-2 border rounded-md bg-[var(--input-bg)] text-[var(--foreground)] focus:outline-none focus:ring-2 disabled:opacity-50 text-sm [color-scheme:light] dark:[color-scheme:dark] ${
+                        timeWindowError ? 'border-red-500 focus:ring-red-500' : 'border-[var(--input-border)] focus:ring-[var(--primary)]'
+                      }`}
+                    />
+                  </div>
+                  {timeWindowError ? (
+                    <p className="text-xs text-red-500 mt-1 font-medium">{timeWindowError}</p>
+                  ) : autoTimeWindow.start && autoTimeWindow.start === autoTimeWindow.end ? (
+                    <p className="text-xs text-[var(--secondary)] mt-1">
+                      Start = End → runs 24 × 7 (no restriction)
+                    </p>
+                  ) : (
+                    <p className="text-xs text-[var(--secondary)] mt-1">
+                      Loop auto-pauses outside this window and resumes at start time next day
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-end gap-3">
                   <button
@@ -4238,7 +4042,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                         setRefreshingChunkStatuses(false);
                       }
                     }}
-                    disabled={isAutoStarting || autoStartChunks.length === 0 || refreshingChunkStatuses}
+                    disabled={isAutoStarting || isAutoScheduled || autoStartChunks.length === 0 || refreshingChunkStatuses}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
                     {refreshingChunkStatuses ? (
@@ -4255,13 +4059,18 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                   </button>
                   <button
                     onClick={handleAutoStartChunks}
-                    disabled={isAutoStarting || autoStartChunks.length === 0}
+                    disabled={isAutoStarting || isAutoScheduled || autoStartChunks.length === 0 || !!timeWindowError}
                     className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-md hover:from-green-700 hover:to-green-800 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    {isAutoStarting ? (
+                    {isAutoScheduled ? (
+                      <>
+                        <Clock className="w-4 h-4" />
+                        Waiting for Window...
+                      </>
+                    ) : isAutoStarting ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Auto-Starting...
+                        Running...
                       </>
                     ) : (
                       <>
@@ -4270,34 +4079,67 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                       </>
                     )}
                   </button>
-                  {isAutoStarting && (
+                  {isAutoStarting && !isAutoPaused && !isAutoScheduled && (
                     <button
-                      onClick={async () => {
-                        console.log('[AUTO_START] Stop requested by user');
-                        setShouldStopAutoStart(true);
-                        shouldStopAutoStartRef.current = true; // Also update ref for immediate access
-                        
-                        // 🔔 Send "Campaign Paused" notification immediately
-                        if (autoStartModal.campaign) {
-                          try {
-                            console.log('[AUTO_START] Sending campaign paused notification...');
-                            const pauseNotifResponse = await api.post(`/campaign/${autoStartModal.campaign.id}/notify/paused`);
-                            if (pauseNotifResponse.ok) {
-                              console.log('[AUTO_START] ✅ Campaign paused notification sent to GChat');
-                            }
-                          } catch (pauseError) {
-                            console.error('[AUTO_START] Failed to send paused notification:', pauseError);
-                          }
-                        }
-                      }}
+                      onClick={handlePauseAutoRun}
+                      className="px-6 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors text-sm font-medium flex items-center gap-2"
+                    >
+                      <Pause className="w-4 h-4" />
+                      Pause
+                    </button>
+                  )}
+                  {isAutoPaused && (
+                    <button
+                      onClick={handleResumeAutoRun}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2"
+                    >
+                      <Play className="w-4 h-4" />
+                      Resume
+                    </button>
+                  )}
+                  {(isAutoStarting || isAutoPaused || isAutoScheduled) && (
+                    <button
+                      onClick={handleStopAutoRun}
                       className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium flex items-center gap-2"
                     >
                       <XCircle className="w-4 h-4" />
-                      Stop Auto Start
+                      Stop
                     </button>
                   )}
                 </div>
               </div>
+
+              {/* Backend loop status bar */}
+              {autoRunStatus && autoRunStatus.status !== 'idle' && (
+                <div className={`mt-3 p-2 rounded-md text-xs font-medium flex items-center gap-2 ${
+                  autoRunStatus.status === 'running'
+                    ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                    : autoRunStatus.status === 'paused'
+                    ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
+                    : autoRunStatus.status === 'scheduled'
+                    ? 'bg-purple-500/10 text-purple-700 dark:text-purple-400'
+                    : autoRunStatus.status === 'completed'
+                    ? 'bg-blue-500/10 text-blue-700 dark:text-blue-400'
+                    : 'bg-gray-500/10 text-gray-600 dark:text-gray-400'
+                }`}>
+                  {autoRunStatus.status === 'running'   && <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />}
+                  {autoRunStatus.status === 'paused'    && <Pause className="w-3 h-3 flex-shrink-0" />}
+                  {autoRunStatus.status === 'scheduled' && <Clock className="w-3 h-3 flex-shrink-0" />}
+                  {autoRunStatus.status === 'completed' && <CheckCircle2 className="w-3 h-3 flex-shrink-0" />}
+                  {autoRunStatus.status === 'stopped'   && <XCircle className="w-3 h-3 flex-shrink-0" />}
+                  <span>
+                    Backend: {autoRunStatus.status.toUpperCase()}
+                    {autoRunStatus.status === 'running'   && ` — chunk ${autoRunStatus.current_chunk_index + 1} of ${autoRunStatus.total_chunks}`}
+                    {autoRunStatus.status === 'paused'    && ` — paused at chunk ${autoRunStatus.current_chunk_index + 1} of ${autoRunStatus.total_chunks}`}
+                    {autoRunStatus.status === 'scheduled' && (() => {
+                      if (!autoRunStatus.next_resume_at) return ' — waiting for time window';
+                      const d = new Date(autoRunStatus.next_resume_at);
+                      const hhmm = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+                      return ` — outside run window · resumes at ${hhmm} IST`;
+                    })()}
+                  </span>
+                </div>
+              )}
 
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 rounded-md text-xs">
                 <p className="font-semibold mb-1">How Auto Start Works:</p>
@@ -4364,7 +4206,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                 </thead>
                 <tbody>
                   {autoStartChunks.map((chunk, index) => {
-                    const progress = autoStartProgress[chunk.id];
+                    const progress = autoRunStatus?.chunk_progress.find(p => p.chunk_id === chunk.id);
                     return (
                       <tr key={chunk.id} className="hover:bg-[var(--table-row-hover)]">
                         <td className="border border-[var(--card-border)] px-4 py-2 text-sm text-[var(--foreground)]">
@@ -4398,6 +4240,9 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                         <td className="border border-[var(--card-border)] px-4 py-2 text-sm">
                           {progress ? (
                             <div className="flex items-center gap-2">
+                              {progress.status === 'pending' && (
+                                <Clock className="w-4 h-4 text-gray-400" />
+                              )}
                               {progress.status === 'starting' && (
                                 <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
                               )}
@@ -4429,7 +4274,7 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
                               disabled={isAutoStarting || startingIndividualChunk === chunk.id || !chunk.cid}
                               className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                             >
-                              {(startingIndividualChunk === chunk.id || autoStartProgress[chunk.id]?.status === 'starting') ? (
+                              {(startingIndividualChunk === chunk.id || progress?.status === 'starting') ? (
                                 <>
                                   <Loader2 className="w-3 h-3 animate-spin" />
                                   Starting...
@@ -4466,16 +4311,14 @@ export function CampaignManagement({ selectedClientId }: CampaignManagementProps
             <div className="flex items-center justify-end mt-6">
               <button
                 onClick={() => {
-                  if (!isAutoStarting) {
-                    setAutoStartModal({ show: false, campaign: null });
-                    setAutoStartChunks([]);
-                    setAutoStartProgress({});
-                  }
+                  stopPollingAutoRun();
+                  setAutoRunStatus(null);
+                  setAutoStartModal({ show: false, campaign: null });
+                  setAutoStartChunks([]);
                 }}
-                disabled={isAutoStarting}
-                className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 border border-[var(--input-border)] rounded-md bg-[var(--input-bg)] text-[var(--foreground)] text-sm font-medium hover:bg-[var(--table-row-hover)] transition-colors"
               >
-                {isAutoStarting ? 'Running...' : 'Close'}
+                Close
               </button>
             </div>
           </div>

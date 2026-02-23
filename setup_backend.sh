@@ -12,7 +12,7 @@
 set -e  # Exit on any error
 
 echo "=========================================="
-echo "Backend Setup Script - AWS Deployment"
+echo "Backend Setup Script - "
 echo "=========================================="
 echo ""
 
@@ -29,13 +29,22 @@ BACKEND_DIR="$SCRIPT_DIR/backend"
 echo -e "${GREEN}[1/6]${NC} Checking Python installation..."
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}ERROR: Python 3 is not installed. Please install Python 3.8 or higher.${NC}"
+    echo -e "${YELLOW}On Mac: Install Xcode Command Line Tools (xcode-select --install) or Python via Homebrew.${NC}"
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
-PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d'.' -f1)
-PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
-echo -e "${GREEN}✓${NC} Python version: $(python3 --version)"
+# Get Python version (capture stderr in case macOS stub redirects there)
+PYTHON_VERSION=$(python3 --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+if [ -z "$PYTHON_VERSION" ]; then
+    echo -e "${RED}ERROR: Could not detect Python version. On Mac, you may need Xcode Command Line Tools:${NC}"
+    echo -e "${YELLOW}  Run: xcode-select --install${NC}"
+    echo -e "${YELLOW}  Or install Python via Homebrew: brew install python@3.11${NC}"
+    exit 1
+fi
+
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d'.' -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d'.' -f2)
+echo -e "${GREEN}✓${NC} Python version: $PYTHON_VERSION"
 
 # Check Python version (3.8+)
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then

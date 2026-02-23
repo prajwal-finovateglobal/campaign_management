@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Boolean, JSON, Text, NUMERIC
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Boolean, JSON, Text, NUMERIC, Time
 from database.session import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy import ForeignKey
@@ -190,6 +190,7 @@ class DataManager(Base):
     client_id = Column(BigInteger, nullable=False)
     campaign_id = Column(BigInteger, nullable=False)
     status = Column(String(20), nullable=False)  # queue, running, completed, failed
+    priority = Column(Integer, nullable=False, default=0)
     action = Column(String(10), nullable=False, default='run')  # run, pause, stop
     processed_steps = Column(Integer, nullable=False, default=0)
     total_steps = Column(Integer, nullable=True)
@@ -205,6 +206,62 @@ class DataManager(Base):
     updated_at = Column(
         DateTime(timezone=True), 
         nullable=False, 
+        server_default=text("((timezone('Asia/Kolkata', NOW()))::timestamp AT TIME ZONE 'Asia/Kolkata')")
+    )
+
+
+class CampaignState(Base):
+    """
+    Tracks the state of backend-driven auto-run loops for multiple-type campaigns.
+    One row per campaign (unique on campaign_id).
+    The loop reads 'action' to know whether to run, pause, or stop.
+    Per-chunk progress is stored as a JSON array in chunk_progress.
+    """
+    __tablename__ = "cms_campaign_state"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, nullable=False)
+    campaign_id = Column(
+        BigInteger,
+        ForeignKey('cms_campaign.id', ondelete='CASCADE'),
+        nullable=False,
+        unique=True
+    )
+    client_id = Column(BigInteger, nullable=False)
+
+    # Overall run state
+    status = Column(String(20), nullable=False, default='idle')
+    # idle, running, paused, stopped, completed
+
+    # Control flag — frontend writes this; loop reads it
+    action = Column(String(10), nullable=False, default='run')
+    # run, pause, stop
+
+    # Config snapshot at start
+    gap_seconds = Column(Integer, nullable=False, default=30)
+
+    # Progress tracking
+    current_chunk_index = Column(Integer, nullable=False, default=0)
+    total_chunks = Column(Integer, nullable=False, default=0)
+
+    # NOTE: per-chunk progress is stored directly in cms_chunks.auto_run_status
+    # and cms_chunks.auto_run_message — no JSON blob needed here.
+
+    # Daily time-window (IST). NULL = no restriction (runs 24x7).
+    # Format: datetime.time, e.g. time(9, 30) = 09:30 IST
+    start_time = Column(Time, nullable=True)
+    end_time   = Column(Time, nullable=True)
+
+    # Timestamps
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("((timezone('Asia/Kolkata', NOW()))::timestamp AT TIME ZONE 'Asia/Kolkata')")
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
         server_default=text("((timezone('Asia/Kolkata', NOW()))::timestamp AT TIME ZONE 'Asia/Kolkata')")
     )
 

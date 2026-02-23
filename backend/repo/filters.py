@@ -523,6 +523,42 @@ def filter_by_connected_status(query: Query, con_status: Optional[bool]) -> Quer
     # If con_status is None, return query unchanged
     return query
 
+def filter_by_connected_status_v2(query: Query, con_status: Optional[bool]) -> Query:
+    """
+    Alternative filter for connected status using the call_status column.
+    Connected: call_status != 'failed'
+    Disconnected: call_status = 'failed'
+
+    This is a candidate replacement for filter_by_connected_status().
+    Both functions should be compared for result parity and performance
+    before switching over.
+
+    Args:
+        query: SQLAlchemy Query object (not executed).
+        con_status: Boolean - if True, filter for connected calls; if False, for disconnected.
+
+    Returns:
+        Modified Query object (not executed).
+    """
+    if query is None:
+        logger.warning("Cannot filter by connected status v2: query is None")
+        return query
+
+    model = _get_model_from_query(query)
+    if model is None:
+        logger.warning("Could not extract model from query for connected_status_v2 filter")
+        return query
+
+    if con_status is True:
+        logger.info("Filtering by connected status v2: True (call_status != 'failed')")
+        return query.filter(model.call_status != 'failed')
+    elif con_status is False:
+        logger.info("Filtering by connected status v2: False (call_status = 'failed')")
+        return query.filter(model.call_status == 'failed')
+
+    # If con_status is None, return query unchanged
+    return query
+
 def filter_by_phase_id(query: Query, phase_id: Optional[int]) -> Query:
     """
     Filter query by phase_id by joining Campaign table with DataLog.
@@ -608,3 +644,44 @@ def filter_by_phase_id(query: Query, phase_id: Optional[int]) -> Query:
         return query
     return query
 
+
+def filter_by_search(query: Query, search_column: Optional[str], search_value: Optional[str]) -> Query:
+    """
+    Case-insensitive contains search on a single column.
+    Uses ILIKE on PostgreSQL; falls back to lowercased LIKE on other databases.
+
+    Args:
+        query: SQLAlchemy Query object (not executed).
+        search_column: Name of the column to search in.
+        search_value: Search term (partial match, case-insensitive).
+
+    Returns:
+        Modified Query object (not executed).
+    """
+    if not search_column or not search_value or not search_value.strip():
+        return query
+
+    if query is None:
+        logger.warning("Cannot apply search filter: query is None")
+        return query
+
+    model = _get_model_from_query(query)
+    if model is None:
+        logger.warning("Could not extract model from query for search filter")
+        return query
+
+    if not hasattr(model, search_column):
+        logger.warning(f"Model {model} has no column '{search_column}', skipping search filter")
+        return query
+
+    col = getattr(model, search_column)
+    term = search_value.strip()
+    logger.info(f"Applying search filter: {search_column} ILIKE '%{term}%'")
+
+    try:
+        # ilike is PostgreSQL native case-insensitive LIKE
+        return query.filter(col.ilike(f'%{term}%'))
+    except Exception:
+        # Fallback for databases that don't support ilike
+        from sqlalchemy import func
+        return query.filter(func.lower(col).like(f'%{term.lower()}%'))

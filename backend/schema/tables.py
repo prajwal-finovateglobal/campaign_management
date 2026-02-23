@@ -15,6 +15,10 @@ class ShowDataRequest(BaseModel):
     phase_id: Optional[int] = None
     campaign_id: Optional[int] = None  # Keep for backward compatibility (single campaign)
     campaign_ids: Optional[List[int]] = None  # New: support multiple campaigns
+    page: int = 1
+    page_size: int = 10
+    search_column: Optional[str] = None   # column name to search in
+    search_value: Optional[str] = None    # search term (case-insensitive contains)
 
 class DataLog(BaseModel):
     s_no: Optional[int] = None
@@ -36,6 +40,30 @@ class DataLog(BaseModel):
 
 class ShowDataResponse(BaseModel):
     data: List[DataLog]
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 10
+
+class ExportDataRequest(BaseModel):
+    """Same filter fields as ShowDataRequest plus export options. No pagination — always fetches all rows."""
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    con_status: Optional[bool] = None
+    direction: Optional[str] = None
+    language: Optional[str] = None
+    duration: Optional[float] = None
+    duration_min: Optional[float] = None
+    duration_max: Optional[float] = None
+    client_id: Optional[int] = None
+    table_name: Optional[str] = None
+    phase_id: Optional[int] = None
+    campaign_id: Optional[int] = None
+    campaign_ids: Optional[List[int]] = None
+    search_column: Optional[str] = None
+    search_value: Optional[str] = None
+    selected_columns: List[str]
+    export_format: str = 'csv'       # 'csv' or 'json'
+    filename: str = 'campaign_data'
 
 class UpdateTableNameRequest(BaseModel):
     table_name: str

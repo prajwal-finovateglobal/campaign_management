@@ -92,6 +92,13 @@ export default function Home() {
   const [searchColumn, setSearchColumn] = useState<string>('');
   const [searchInput, setSearchInput] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [lastFilters, setLastFilters] = useState<any>(null);
+  const [pageInputValue, setPageInputValue] = useState<string>('1');
   
   // Initialize theme from localStorage or system preference
   useEffect(() => {
@@ -160,6 +167,18 @@ export default function Home() {
     }
   }, []);
 
+  // Re-fetch when search input or column changes (debounced 500ms, DB-level search)
+  useEffect(() => {
+    if (!lastFilters) return;
+    const timer = setTimeout(() => {
+      setCurrentPage(1);
+      setPageInputValue('1');
+      fetchPage(lastFilters, 1, pageSize);
+    }, 500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput, searchColumn]);
+
   // Handle logout
   const handleLogout = async () => {
     try {
@@ -179,52 +198,43 @@ export default function Home() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<number[] | null>(null);
 
-  const handleApplyFilters = async (filters: any) => {
-    // Validate that client is selected before applying filters
-    if (!selectedClientId) {
-      alert('Please select a client first before applying filters.');
-      return;
+  const buildRequestBody = (filters: any, page: number, size: number, searchCol?: string, searchVal?: string) => {
+    const requestBody: any = {
+      ...filters,
+      client_id: selectedClientId,
+      table_name: selectedClientTableName,
+      phase_id: selectedPhaseId,
+      page,
+      page_size: size,
+    };
+    if (selectedCampaignIds && selectedCampaignIds.length > 0) {
+      requestBody.campaign_ids = selectedCampaignIds;
+    } else if (selectedCampaignId) {
+      requestBody.campaign_ids = [selectedCampaignId];
+    } else {
+      requestBody.campaign_ids = null;
     }
+    // DB-level search
+    const col = searchCol ?? searchColumn;
+    const val = searchVal ?? searchInput;
+    if (col && val.trim()) {
+      requestBody.search_column = col;
+      requestBody.search_value = val.trim();
+    }
+    return requestBody;
+  };
 
+  const fetchPage = async (filters: any, page: number, size: number) => {
     setLoading(true);
     try {
-      // Add persistent filter values to the request
-      const requestBody: any = {
-        ...filters,
-        client_id: selectedClientId,
-        table_name: selectedClientTableName,
-        phase_id: selectedPhaseId,
-      };
-      
-      // Always use campaign_ids (array) for consistency - works for both single and multiple
-      // Single mode: [35] -> WHERE campaign_id IN (35)
-      // Multiple mode: [35, 45, 136] -> WHERE campaign_id IN (35, 45, 136)
-      // All campaigns: will be handled by backend when campaign_ids is empty/null but phase_id is set
-      console.log('Filter apply - selectedCampaignIds:', selectedCampaignIds);
-      console.log('Filter apply - selectedCampaignId:', selectedCampaignId);
-      
-      if (selectedCampaignIds && selectedCampaignIds.length > 0) {
-        requestBody.campaign_ids = selectedCampaignIds;
-        console.log('Sending campaign_ids to backend:', selectedCampaignIds);
-      } else if (selectedCampaignId) {
-        // Single mode: convert to array [id]
-        requestBody.campaign_ids = [selectedCampaignId];
-        console.log('Sending single campaign_id as array to backend:', [selectedCampaignId]);
-      } else {
-        // No campaign selected - backend will get all campaigns from phase if phase_id is set
-        console.log('No campaign selected - backend will use all campaigns from phase if phase_id is set');
-        // Explicitly set to null to avoid backend confusion
-        requestBody.campaign_ids = null;
-      }
-      
+      const requestBody = buildRequestBody(filters, page, size);
       const response = await api.post('/show_data', requestBody);
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch data');
-      }
-
+      if (!response.ok) throw new Error('Failed to fetch data');
       const result = await response.json();
       setData(result.data || []);
+      setTotalCount(result.total_count ?? 0);
+      setCurrentPage(result.page ?? page);
+      setPageInputValue(String(result.page ?? page));
 
       // Initialize column selection - preserve preset or existing selection
       if (result.data && result.data.length > 0) {
@@ -298,6 +308,36 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApplyFilters = async (filters: any) => {
+    if (!selectedClientId) {
+      alert('Please select a client first before applying filters.');
+      return;
+    }
+    // Reset to page 1 and clear search on new filter apply
+    setSearchInput('');
+    setLastFilters(filters);
+    setCurrentPage(1);
+    setPageInputValue('1');
+    await fetchPage(filters, 1, pageSize);
+  };
+
+  const handlePageChange = async (newPage: number) => {
+    if (!lastFilters || newPage < 1) return;
+    const totalPages = Math.ceil(totalCount / pageSize);
+    if (newPage > totalPages) return;
+    setCurrentPage(newPage);
+    setPageInputValue(String(newPage));
+    await fetchPage(lastFilters, newPage, pageSize);
+  };
+
+  const handlePageSizeChange = async (newSize: number) => {
+    if (!lastFilters) return;
+    setPageSize(newSize);
+    setCurrentPage(1);
+    setPageInputValue('1');
+    await fetchPage(lastFilters, 1, newSize);
   };
 
   const handleToggleSelectAll = () => {
@@ -709,8 +749,8 @@ export default function Home() {
       setClearTDMessage(message);
       
       // Reload data if filters are applied
-      if (data.length > 0) {
-        handleApplyFilters({}); // Refresh the data
+      if (lastFilters !== null) {
+        await fetchPage(lastFilters, currentPage, pageSize);
       }
     } catch (error) {
       console.error('Error clearing TD:', error);
@@ -732,7 +772,7 @@ export default function Home() {
   };
 
   const handleLoadSDTC = async () => {
-    if (data.length === 0) {
+    if (!lastFilters) {
       const timeout = setTimeout(() => setSdtcError(null), 5000);
       setSdtcErrorTimeout(timeout);
       setSdtcError('No data to load. Please apply filters first.');
@@ -747,7 +787,6 @@ export default function Home() {
     }
 
     try {
-      // Prepare data with only selected columns
       const selectedCols = Object.keys(selectedColumns).filter(
         (key) => selectedColumns[key]
       );
@@ -760,27 +799,14 @@ export default function Home() {
         return;
       }
 
-      // Filter data to include only selected columns
-      const dataToSend = data.map((row) => {
-        const filteredRow: any = {};
-        selectedCols.forEach((col) => {
-          const value = (row as any)[col];
-          // Convert objects/arrays to JSON strings for CSV storage
-          if (value !== null && value !== undefined) {
-            if (typeof value === 'object' && !Array.isArray(value)) {
-              // For objects (like meta_data, chat), stringify to JSON
-              filteredRow[col] = JSON.stringify(value);
-            } else {
-              filteredRow[col] = value;
-            }
-          } else {
-            filteredRow[col] = value;
-          }
-        });
-        return filteredRow;
-      });
+      // Build request: same filter params as the display query + selected columns
+      // Backend will run the full query (all rows, no pagination) and write to data.csv
+      const requestBody = buildRequestBody(lastFilters, 1, 1);  // page/page_size unused by this endpoint
+      delete requestBody.page;
+      delete requestBody.page_size;
+      requestBody.selected_columns = selectedCols;
 
-      const response = await api.post('/load_sdtc', { data: dataToSend });
+      const response = await api.post('/load_sdtc_query', requestBody);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -920,79 +946,60 @@ export default function Home() {
     setShowCSVPreview(true);
   };
 
-  const performCSVDownload = () => {
-    const selectedCols = Object.keys(selectedColumns).filter(
-      (key) => selectedColumns[key]
-    );
-
-    let blob: Blob;
-    let filename: string;
-    let mimeType: string;
-
-    if (downloadFormat === 'json') {
-      // Create JSON content
-      const jsonData = filteredData.map((row) => {
-        const jsonRow: Record<string, any> = {};
-        selectedCols.forEach((col) => {
-          jsonRow[col] = (row as any)[col];
-        });
-        return jsonRow;
-      });
-      const jsonContent = JSON.stringify(jsonData, null, 2);
-      blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
-      filename = `${csvFileName || 'campaign_data'}.json`;
-      mimeType = 'application/json';
-    } else {
-    // Create CSV content
-    const headers = selectedCols.map(col => `"${col}"`).join(',');
-    const rows = filteredData.map((row) => {
-      return selectedCols
-        .map((col) => {
-          const value = (row as any)[col];
-          const formattedValue = formatValueForCSV(value, col);
-          return `"${formattedValue}"`;
-        })
-        .join(',');
-    });
-    const csvContent = [headers, ...rows].join('\n');
-      blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      filename = `${csvFileName || 'campaign_data'}.csv`;
-      mimeType = 'text/csv';
+  const performCSVDownload = async () => {
+    if (!lastFilters) {
+      alert('No data to export. Please apply filters first.');
+      return;
     }
 
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    // Close the preview modal
+    const selectedCols = Object.keys(selectedColumns).filter((key) => selectedColumns[key]);
+    if (selectedCols.length === 0) {
+      alert('Please select at least one column');
+      return;
+    }
+
+    const filename = csvFileName || 'campaign_data';
+
+    // Build request body (same filters + search as current view, all rows)
+    const requestBody = buildRequestBody(lastFilters, 1, 1);
+    delete requestBody.page;
+    delete requestBody.page_size;
+    requestBody.selected_columns = selectedCols;
+    requestBody.export_format = downloadFormat;
+    requestBody.filename = filename;
+
+    try {
+      const response = await api.post('/export_data', requestBody);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert(`Export failed: ${err.detail || 'Unknown error'}`);
+        return;
+      }
+
+      const blob = await response.blob();
+      const ext = downloadFormat === 'json' ? 'json' : 'csv';
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filename}.${ext}`;
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Export failed. Please check if the backend is running.');
+    }
+
     setShowCSVPreview(false);
   };
 
   // Get available columns for search dropdown (only selected columns)
   const availableSearchColumns = Object.keys(selectedColumns).filter((key) => selectedColumns[key]);
 
-  // Filter data based on search
-  const filteredData = (() => {
-    if (!searchColumn || !searchInput.trim()) {
-      return data;
-    }
-
-    const searchTerm = searchInput.trim().toLowerCase();
-    return data.filter((row) => {
-      const value = (row as any)[searchColumn];
-      if (value === null || value === undefined) {
-        return false;
-      }
-      // Convert to string and check if it contains the search term (case-insensitive)
-      const stringValue = String(value).toLowerCase();
-      return stringValue.includes(searchTerm);
-    });
-  })();
+  // Search is now handled by the DB — filteredData is the current page as-is
+  const filteredData = data;
 
   // Show loading state while checking authentication
   if (isAuthenticated === null) {
@@ -1024,7 +1031,7 @@ export default function Home() {
           <div className="flex items-center justify-between flex-wrap mb-2">
             <div className="flex items-center gap-4 flex-wrap">
               <h1 className="text-3xl font-bold text-[var(--foreground)]">
-                Campaign Management Dashboard
+                Campaign Management System
               </h1>
             
             {/* Persistent Filters - Inline with title (Client only) */}
@@ -1060,9 +1067,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <p className="text-[var(--secondary)]">
-            Filter and analyze campaign data with advanced controls
-          </p>
+          
         </div>
 
         {/* Tab Content */}
@@ -1483,11 +1488,11 @@ export default function Home() {
                   <div className="text-sm text-[var(--foreground)] font-medium whitespace-nowrap">
                     Count: {searchInput ? (
                       <>
-                        {filteredData.length} of {data.length}
+                        {filteredData.length} of {totalCount.toLocaleString()}
                       </>
                     ) : (
                       <>
-                        {data.length}
+                        {totalCount.toLocaleString()}
                       </>
                     )}
                   </div>
@@ -1545,6 +1550,81 @@ export default function Home() {
                 onViewChat={(chat) => setSelectedChat(chat)}
                 onViewMetadata={(metadata) => setSelectedMetadata(metadata)}
               />
+
+              {/* Paginator */}
+              {totalCount > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-4 px-1">
+                  {/* Left: total info */}
+                  <div className="text-sm text-[var(--secondary)]">
+                    Showing{' '}
+                    <span className="font-medium text-[var(--foreground)]">
+                      {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalCount)}
+                    </span>{' '}
+                    of{' '}
+                    <span className="font-medium text-[var(--foreground)]">{totalCount.toLocaleString()}</span>{' '}
+                    records
+                  </div>
+
+                  {/* Center: prev / page-input / next */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage <= 1 || loading}
+                      className="px-3 py-1.5 rounded-md border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--foreground)] text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--input-bg)] transition-colors"
+                    >
+                      ← Prev
+                    </button>
+
+                    <div className="flex items-center gap-1.5 text-sm text-[var(--secondary)]">
+                      <span>Page</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={Math.ceil(totalCount / pageSize)}
+                        value={pageInputValue}
+                        onChange={(e) => setPageInputValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const p = parseInt(pageInputValue);
+                            if (!isNaN(p)) handlePageChange(p);
+                          }
+                        }}
+                        onBlur={() => {
+                          const p = parseInt(pageInputValue);
+                          if (!isNaN(p)) handlePageChange(p);
+                          else setPageInputValue(String(currentPage));
+                        }}
+                        className="w-14 px-2 py-1 rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--foreground)] text-sm text-center focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                      />
+                      <span>of {Math.ceil(totalCount / pageSize)}</span>
+                    </div>
+
+                    <button
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage >= Math.ceil(totalCount / pageSize) || loading}
+                      className="px-3 py-1.5 rounded-md border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--foreground)] text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--input-bg)] transition-colors"
+                    >
+                      Next →
+                    </button>
+                  </div>
+
+                  {/* Right: rows-per-page */}
+                  <div className="flex items-center gap-2 text-sm text-[var(--secondary)]">
+                    <span>Rows per page:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={pageSize}
+                      onChange={(e) => {
+                        const s = parseInt(e.target.value);
+                        if (!isNaN(s) && s > 0) handlePageSizeChange(s);
+                      }}
+                      className="w-16 px-2 py-1 rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--foreground)] text-sm text-center focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1577,7 +1657,7 @@ export default function Home() {
 
         {/* Monitor Tab */}
         <div className={activeTab === 'monitor' ? '' : 'hidden'}>
-          <CampaignMonitor />
+          <CampaignMonitor selectedClientId={selectedClientId} />
         </div>
 
         {/* Disposition Tree Tab */}
