@@ -189,11 +189,11 @@ async def _wait_for_time_window(campaign_id: int, db):
                 chunks_done    = sum(1 for c in progress if c['status'] == 'finished')
                 chunks_left    = sum(1 for c in progress if c['status'] in (
                     'pending', 'starting', 'waiting_finish', 'countdown'))
-                # next_chunk_number: 1-based index of the first chunk that still needs to run
                 next_chunk_num = chunks_done + 1
 
-                if chunks_done == 0 and state.current_chunk_index == 0:
-                    # ⏳ Started BEFORE the window — no chunks have run yet
+                # Choose notification by time: before window = waiting to open; after end = window closed
+                if cur_time < start_t:
+                    # ⏳ Current time is BEFORE window opens — waiting for start_time (e.g. started at 1:59, window 2:00)
                     await notify_window_waiting_to_start(
                         campaign_name=cname,
                         campaign_id=campaign_id,
@@ -204,7 +204,7 @@ async def _wait_for_time_window(campaign_id: int, db):
                         next_chunk_number=next_chunk_num,
                     )
                 else:
-                    # 🕐 Window closed MID-RUN — send two separate messages
+                    # 🕐 Current time is past end_time — window closed mid-run
                     await notify_window_closed(
                         campaign_name=cname,
                         campaign_id=campaign_id,
