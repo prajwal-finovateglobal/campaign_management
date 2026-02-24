@@ -18,9 +18,7 @@ import {
   Eye,
   Trash2,
   RotateCcw,
-  Sparkles,
-  Paintbrush,
-  Spool
+  Sparkles
 } from 'lucide-react';
 
 interface FilterSectionProps {
@@ -33,10 +31,6 @@ interface FilterSectionProps {
   onPhaseChange?: (phaseId: number | null) => void;
   onCampaignChange?: (campaignId: number | null) => void;
   onCampaignIdsChange?: (campaignIds: number[] | null) => void;
-  onCleanCD?: () => void;
-  onClearTD?: () => void;
-  loadingCleanCD?: boolean;
-  loadingClearTD?: boolean;
 }
 
 interface Phase {
@@ -59,11 +53,7 @@ export function FilterSection({
   selectedCampaignIds,
   onPhaseChange,
   onCampaignChange,
-  onCampaignIdsChange,
-  onCleanCD,
-  onClearTD,
-  loadingCleanCD = false,
-  loadingClearTD = false
+  onCampaignIdsChange
 }: FilterSectionProps) {
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [endTime, setEndTime] = useState<Date | null>(null);
@@ -952,47 +942,7 @@ export function FilterSection({
       )}
 
       {/* Action Buttons */}
-      <div className="flex justify-between items-center pt-4 border-t border-[var(--card-border)]">
-        <div className="flex items-center gap-3">
-          {onCleanCD && (
-            <button
-              onClick={onCleanCD}
-              disabled={loadingCleanCD}
-              className="group relative px-6 py-2.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-md font-medium flex items-center gap-2 overflow-hidden transition-all duration-300 hover:from-purple-600 hover:to-purple-700 hover:shadow-lg hover:shadow-purple-500/50 hover:scale-105 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none"
-            >
-              {/* Animated background shimmer */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
-              
-              {/* Brush icon with animation */}
-              <Paintbrush className={`w-5 h-5 relative z-10 transition-all duration-300 ${loadingCleanCD ? 'brush-cleaning' : 'group-hover:-rotate-45 group-hover:scale-110'}`} />
-              
-              {/* Button text */}
-              <span className="relative z-10">{loadingCleanCD ? 'Cleaning...' : 'Clean CD'}</span>
-              
-              {/* Glow effect on hover */}
-              <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-purple-400/20 via-purple-500/30 to-purple-400/20 blur-sm"></div>
-            </button>
-          )}
-          {onClearTD && (
-            <button
-              onClick={onClearTD}
-              disabled={loadingClearTD}
-              className="group relative px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-md font-medium flex items-center gap-2 overflow-hidden transition-all duration-300 hover:from-indigo-600 hover:to-indigo-700 hover:shadow-lg hover:shadow-indigo-500/50 hover:scale-105 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none"
-            >
-              {/* Animated background shimmer */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
-              
-              {/* Spool icon with bounce animation */}
-              <Spool className="w-5 h-5 relative z-10 transition-all duration-200 group-hover:animate-bounce group-hover:scale-110" />
-              
-              {/* Button text */}
-              <span className="relative z-10">{loadingClearTD ? 'Clearing...' : 'Clear TD'}</span>
-              
-              {/* Glow effect on hover */}
-              <div className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-indigo-400/20 via-indigo-500/30 to-indigo-400/20 blur-sm"></div>
-            </button>
-          )}
-        </div>
+      <div className="flex justify-end items-center pt-4 border-t border-[var(--card-border)]">
         <button
           onClick={handleApply}
           disabled={loading}

@@ -1,13 +1,20 @@
 'use client';
 
-import { X, Download } from 'lucide-react';
-import { useMemo } from 'react';
+import { X, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
 
 interface CSVPreviewModalProps {
+  /** Initial page data (e.g. first page) */
   data: any[];
   selectedColumns: Record<string, boolean>;
   csvFileName: string;
   downloadFormat?: 'csv' | 'json';
+  /** Total number of rows that will be exported (for display and pagination) */
+  totalCount: number;
+  /** Page size for preview (same as table page size) */
+  pageSize: number;
+  /** Fetch a specific page of preview data (1-based). Returns rows for that page. */
+  fetchPreviewPage: (page: number) => Promise<any[]>;
   onClose: () => void;
   onConfirmDownload: () => void;
 }
@@ -96,6 +103,9 @@ export function CSVPreviewModal({
   selectedColumns,
   csvFileName,
   downloadFormat = 'csv',
+  totalCount,
+  pageSize,
+  fetchPreviewPage,
   onClose,
   onConfirmDownload,
 }: CSVPreviewModalProps) {
@@ -103,9 +113,33 @@ export function CSVPreviewModal({
     return Object.keys(selectedColumns).filter((key) => selectedColumns[key]);
   }, [selectedColumns]);
 
+  const [previewPage, setPreviewPage] = useState(1);
+  const [previewDataRaw, setPreviewDataRaw] = useState<any[]>(data);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  const totalPreviewPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  // When modal opens or page changes, fetch that page (always fetch so preview matches export filters)
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingPreview(true);
+    fetchPreviewPage(previewPage)
+      .then((rows) => {
+        if (!cancelled) setPreviewDataRaw(rows || []);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPreview(false);
+      });
+    return () => { cancelled = true; };
+  }, [previewPage, fetchPreviewPage]);
+
+  // Reset to page 1 when modal opens
+  useEffect(() => {
+    setPreviewPage(1);
+  }, []);
+
   const previewData = useMemo(() => {
-    // Show first 10 rows for preview
-    return data.slice(0, 10).map((row) => {
+    return previewDataRaw.map((row) => {
       const previewRow: Record<string, string> = {};
       selectedCols.forEach((col) => {
         const value = (row as any)[col];
@@ -113,7 +147,10 @@ export function CSVPreviewModal({
       });
       return previewRow;
     });
-  }, [data, selectedCols]);
+  }, [previewDataRaw, selectedCols]);
+
+  const startRow = (previewPage - 1) * pageSize + 1;
+  const endRow = Math.min(previewPage * pageSize, totalCount);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
@@ -140,9 +177,12 @@ export function CSVPreviewModal({
                 <span className="font-semibold">File name:</span> {csvFileName || 'campaign_data'}.{downloadFormat}
               </p>
               <p className="text-sm text-[var(--secondary)]">
-                <span className="font-semibold">Total rows:</span> {data.length} | 
+                <span className="font-semibold">Total rows:</span> {totalCount.toLocaleString()} | 
                 <span className="font-semibold"> Columns:</span> {selectedCols.length} | 
-                <span className="font-semibold"> Preview:</span> Showing first 10 rows
+                <span className="font-semibold"> Preview:</span> Showing rows {startRow}–{endRow} of {totalCount.toLocaleString()}
+                {totalPreviewPages > 1 && (
+                  <span className="ml-1">(page {previewPage} of {totalPreviewPages})</span>
+                )}
               </p>
             </div>
             <div className="flex gap-2">
@@ -165,7 +205,11 @@ export function CSVPreviewModal({
 
         {/* Preview Table */}
         <div className="flex-1 overflow-auto p-4">
-          {previewData.length === 0 ? (
+          {loadingPreview ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-[var(--secondary)]">Loading preview...</p>
+            </div>
+          ) : previewData.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-[var(--secondary)]">No data to preview</p>
             </div>
@@ -208,15 +252,36 @@ export function CSVPreviewModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-[var(--card-border)] bg-[var(--table-header-bg)]">
-          <p className="text-xs text-[var(--secondary)] text-center">
-            {data.length > 10 ? (
-              <>Showing first 10 of {data.length} rows. All {data.length} rows will be included in the download.</>
-            ) : (
-              <>All {data.length} rows will be included in the download.</>
-            )}
+        {/* Footer: pagination + download note */}
+        <div className="p-4 border-t border-[var(--card-border)] bg-[var(--table-header-bg)] flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-xs text-[var(--secondary)]">
+            All {totalCount.toLocaleString()} rows will be included in the download.
           </p>
+          {totalPreviewPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                disabled={previewPage <= 1 || loadingPreview}
+                className="p-1.5 rounded-md border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--table-row-hover)] transition-colors"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-xs text-[var(--secondary)] min-w-[100px] text-center">
+                Page {previewPage} of {totalPreviewPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPreviewPage((p) => Math.min(totalPreviewPages, p + 1))}
+                disabled={previewPage >= totalPreviewPages || loadingPreview}
+                className="p-1.5 rounded-md border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--table-row-hover)] transition-colors"
+                aria-label="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

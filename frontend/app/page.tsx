@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FilterSection } from '@/components/FilterSection';
 import { DataTable } from '@/components/DataTable';
@@ -8,18 +8,10 @@ import { AudioPlayerModal } from '@/components/AudioPlayerModal';
 import { ChatModal } from '@/components/ChatModal';
 import { MetadataModal } from '@/components/MetadataModal';
 import { CSVPreviewModal } from '@/components/CSVPreviewModal';
-import { CampaignManagement } from '@/components/CampaignManagement';
-import { DispositionTree } from '@/components/DispositionTree';
 import { PersistentFilters } from '@/components/PersistentFilters';
-import { CampaignAutomation } from '@/components/CampaignAutomation';
-import { CampaignMonitor } from '@/components/CampaignMonitor';
 import { Download, AlertCircle, Info, CheckCircle2, X, Database, BarChart3, Wrench, Search, ChevronDown, ChevronLeft, ChevronRight, Network, LogOut, Loader2, Trash2, Sun, Moon, AlertTriangle, FileText, Code, Braces, Sheet } from 'lucide-react';
 import { api, setAuthToken, getAuthToken } from '@/lib/api';
 import '@/components/FilterSection.css';
-import { VerticalSidebar } from '@/components/VerticalSidebar';
-import { RocketIcon } from '@/components/icons/RocketIcon';
-import { FileStackIcon } from '@/components/icons/FileStackIcon';
-import { SquareActivityIcon } from '@/components/icons/SquareActivityIcon';
 
 interface DataLog {
   id?: number;
@@ -60,16 +52,6 @@ export default function Home() {
   const [deletePCDTimeout, setDeletePCDTimeout] = useState<NodeJS.Timeout | null>(null);
   const [loadingDeletePCD, setLoadingDeletePCD] = useState(false);
   const [showDeletePCDModal, setShowDeletePCDModal] = useState(false);
-  const [cleanCDMessage, setCleanCDMessage] = useState<string | null>(null);
-  const [cleanCDTone, setCleanCDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
-  const [cleanCDTimeout, setCleanCDTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [loadingCleanCD, setLoadingCleanCD] = useState(false);
-  const [showCleanCDConfirm, setShowCleanCDConfirm] = useState(false);
-  const [clearTDMessage, setClearTDMessage] = useState<string | null>(null);
-  const [clearTDTone, setClearTDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
-  const [clearTDTimeout, setClearTDTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [loadingClearTD, setLoadingClearTD] = useState(false);
-  const [showClearTDConfirm, setShowClearTDConfirm] = useState(false);
   const [cutCCDMessage, setCutCCDMessage] = useState<string | null>(null);
   const [cutCCDTone, setCutCCDTone] = useState<'positive' | 'neutral' | 'danger'>('neutral');
   const [cutCCDTimeout, setCutCCDTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -80,8 +62,6 @@ export default function Home() {
   const [ccdLimit, setCcdLimit] = useState<number>(50);
   const [showCSVPreview, setShowCSVPreview] = useState(false);
   const [ccdCurrentPage, setCcdCurrentPage] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<'data-management' | 'campaign-management' | 'campaign-automation' | 'reports' | 'monitor' | 'disposition-tree'>('data-management');
-  
   // View/Edit mode states for CCD modal
   const [ccdViewMode, setCcdViewMode] = useState<'view' | 'edit'>('view');
   const [selectedCcdRecords, setSelectedCcdRecords] = useState<Set<number>>(new Set());
@@ -151,21 +131,6 @@ export default function Home() {
 
     checkAuth();
   }, [router]);
-
-  // Handle URL parameters for shared links
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab');
-      if (tabParam === 'disposition-tree') {
-        setActiveTab('disposition-tree');
-      }
-      // Clean up URL after setting tab (optional - keeps URL clean)
-      // if (tabParam === 'disposition-tree') {
-      //   window.history.replaceState({}, '', window.location.pathname);
-      // }
-    }
-  }, []);
 
   // Re-fetch when search input or column changes (debounced 500ms, DB-level search)
   useEffect(() => {
@@ -298,9 +263,9 @@ export default function Home() {
         }
         
         setSelectedColumns(columns);
-        // Set first column as default search column
-        const firstColumn = availableColumns[0];
-        setSearchColumn(firstColumn);
+        // Keep user's search column if it still exists in the new data; otherwise default to first column
+        const firstColumn = availableColumns[0] || '';
+        setSearchColumn((prev) => (availableColumns.includes(prev) ? prev : firstColumn));
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -430,22 +395,6 @@ export default function Home() {
       setCutCCDTimeout(null);
     }
     setCutCCDMessage(null);
-  };
-
-  const handleCloseCleanCDMessage = () => {
-    if (cleanCDTimeout) {
-      clearTimeout(cleanCDTimeout);
-      setCleanCDTimeout(null);
-    }
-    setCleanCDMessage(null);
-  };
-
-  const handleCloseClearTDMessage = () => {
-    if (clearTDTimeout) {
-      clearTimeout(clearTDTimeout);
-      setClearTDTimeout(null);
-    }
-    setClearTDMessage(null);
   };
 
   const handleShowCCD = async () => {
@@ -578,188 +527,6 @@ export default function Home() {
       setDeletePCDMessage('Network error. Please check if backend is running.');
     } finally {
       setLoadingDeletePCD(false);
-    }
-  };
-
-  const handleCleanCD = () => {
-    // Validation: Only require client selection (phase/campaigns are optional)
-    if (!selectedClientId) {
-      setCleanCDTone('danger');
-      setCleanCDMessage('Please select a client first');
-      const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
-      setCleanCDTimeout(timeout);
-      return;
-    }
-
-    // Show confirmation modal
-    // Note: If no campaigns/phase selected, will use client-level mode (all campaigns for client)
-    setShowCleanCDConfirm(true);
-  };
-
-  const executeCleanCD = async () => {
-    // Close confirmation modal
-    setShowCleanCDConfirm(false);
-
-    setLoadingCleanCD(true);
-    setCleanCDMessage(null);
-    if (cleanCDTimeout) {
-      clearTimeout(cleanCDTimeout);
-      setCleanCDTimeout(null);
-    }
-
-    try {
-      // Prepare request payload
-      const requestBody: any = {
-        table_name: selectedClientTableName,
-      };
-
-      // Priority: campaign_ids > phase_id > client_id
-      if (selectedCampaignIds && selectedCampaignIds.length > 0) {
-        requestBody.campaign_ids = selectedCampaignIds;
-        console.log('Clean CD - Mode: Campaign-specific | campaign_ids:', selectedCampaignIds);
-      } else if (selectedPhaseId) {
-        requestBody.phase_id = selectedPhaseId;
-        console.log('Clean CD - Mode: Phase-level | phase_id:', selectedPhaseId);
-      } else if (selectedClientId) {
-        requestBody.client_id = selectedClientId;
-        console.log('Clean CD - Mode: Client-level | client_id:', selectedClientId);
-      } else {
-        setCleanCDTone('danger');
-        setCleanCDMessage('Please select a client, phase, or at least one campaign');
-        const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
-        setCleanCDTimeout(timeout);
-        setLoadingCleanCD(false);
-        return;
-      }
-
-      const response = await api.post('/campaign/clean_cd', requestBody);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        const errorDetail = errorData.detail || errorData;
-        
-        let errorMessage = 'Failed to clean CD';
-        if (errorDetail.error) {
-          errorMessage = errorDetail.error;
-        } else if (typeof errorDetail === 'string') {
-          errorMessage = errorDetail;
-        }
-
-        const tone = errorDetail.tone || 'danger';
-        setCleanCDTone(tone as 'danger');
-        
-        const timeout = setTimeout(() => setCleanCDMessage(null), 8000);
-        setCleanCDTimeout(timeout);
-        setCleanCDMessage(errorMessage);
-        return;
-      }
-
-      const result = await response.json();
-      setCleanCDTone(result.tone || 'positive');
-      
-      // Build detailed message
-      let message = result.message || 'Clean CD completed';
-      if (result.total_records_deleted > 0 && result.records_deleted_per_campaign) {
-        const perCampaign = Object.entries(result.records_deleted_per_campaign)
-          .map(([id, count]) => `Campaign ${id}: ${count}`)
-          .join(', ');
-        message += ` (${perCampaign})`;
-      }
-      
-      const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
-      setCleanCDTimeout(timeout);
-      setCleanCDMessage(message);
-    } catch (error) {
-      console.error('Error cleaning CD:', error);
-      setCleanCDTone('danger');
-      const timeout = setTimeout(() => setCleanCDMessage(null), 5000);
-      setCleanCDTimeout(timeout);
-      setCleanCDMessage('Network error. Please check if backend is running.');
-    } finally {
-      setLoadingCleanCD(false);
-    }
-  };
-
-  const handleClearTD = () => {
-    // Validation: Check if client is selected
-    if (!selectedClientId) {
-      setClearTDTone('danger');
-      setClearTDMessage('Please select a client first');
-      const timeout = setTimeout(() => setClearTDMessage(null), 5000);
-      setClearTDTimeout(timeout);
-      return;
-    }
-
-    // Show confirmation modal
-    setShowClearTDConfirm(true);
-  };
-
-  const executeClearTD = async () => {
-    // Close confirmation modal
-    setShowClearTDConfirm(false);
-
-    setLoadingClearTD(true);
-    setClearTDMessage(null);
-    if (clearTDTimeout) {
-      clearTimeout(clearTDTimeout);
-      setClearTDTimeout(null);
-    }
-
-    try {
-      // Prepare request payload
-      const requestBody = {
-        client_id: selectedClientId,
-        table_name: selectedClientTableName,
-      };
-
-      console.log('Clear TD - sending request:', requestBody);
-
-      const response = await api.post('/campaign/clear_td', requestBody);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        const errorDetail = errorData.detail || errorData;
-        
-        let errorMessage = 'Failed to clear TD';
-        if (errorDetail.error) {
-          errorMessage = errorDetail.error;
-        } else if (typeof errorDetail === 'string') {
-          errorMessage = errorDetail;
-        }
-
-        const tone = errorDetail.tone || 'danger';
-        setClearTDTone(tone as 'danger');
-        
-        const timeout = setTimeout(() => setClearTDMessage(null), 8000);
-        setClearTDTimeout(timeout);
-        setClearTDMessage(errorMessage);
-        return;
-      }
-
-      const result = await response.json();
-      setClearTDTone(result.tone || 'positive');
-      
-      let message = result.message || 'Clear TD completed';
-      if (result.total_records_deleted > 0) {
-        message = `${message} (${result.total_records_deleted} records deleted)`;
-      }
-      
-      const timeout = setTimeout(() => setClearTDMessage(null), 5000);
-      setClearTDTimeout(timeout);
-      setClearTDMessage(message);
-      
-      // Reload data if filters are applied
-      if (lastFilters !== null) {
-        await fetchPage(lastFilters, currentPage, pageSize);
-      }
-    } catch (error) {
-      console.error('Error clearing TD:', error);
-      setClearTDTone('danger');
-      const timeout = setTimeout(() => setClearTDMessage(null), 5000);
-      setClearTDTimeout(timeout);
-      setClearTDMessage('Network error. Please check if backend is running.');
-    } finally {
-      setLoadingClearTD(false);
     }
   };
 
@@ -960,13 +727,30 @@ export default function Home() {
 
     const filename = csvFileName || 'campaign_data';
 
-    // Build request body (same filters + search as current view, all rows)
-    const requestBody = buildRequestBody(lastFilters, 1, 1);
-    delete requestBody.page;
-    delete requestBody.page_size;
-    requestBody.selected_columns = selectedCols;
-    requestBody.export_format = downloadFormat;
-    requestBody.filename = filename;
+    // Build export body from filters only — no pagination; backend returns full result set
+    const requestBody: Record<string, unknown> = {
+      ...lastFilters,
+      client_id: selectedClientId,
+      table_name: selectedClientTableName,
+      phase_id: selectedPhaseId,
+      selected_columns: selectedCols,
+      export_format: downloadFormat,
+      filename,
+    };
+    if (selectedCampaignIds && selectedCampaignIds.length > 0) {
+      requestBody.campaign_ids = selectedCampaignIds;
+    } else if (selectedCampaignId) {
+      requestBody.campaign_ids = [selectedCampaignId];
+    } else {
+      requestBody.campaign_ids = null;
+    }
+    if (searchColumn && searchInput.trim()) {
+      requestBody.search_column = searchColumn;
+      requestBody.search_value = searchInput.trim();
+    }
+    // Explicitly omit page/page_size so backend always does full export
+    delete (requestBody as any).page;
+    delete (requestBody as any).page_size;
 
     try {
       const response = await api.post('/export_data', requestBody);
@@ -995,8 +779,18 @@ export default function Home() {
     setShowCSVPreview(false);
   };
 
-  // Get available columns for search dropdown (only selected columns)
-  const availableSearchColumns = Object.keys(selectedColumns).filter((key) => selectedColumns[key]);
+  /** Fetch a single page of data for the download preview modal (same filters as table, does not change table state) */
+  const fetchPreviewPage = useCallback(async (page: number): Promise<any[]> => {
+    if (!lastFilters) return [];
+    const requestBody = buildRequestBody(lastFilters, page, pageSize);
+    const response = await api.post('/show_data', requestBody);
+    if (!response.ok) return [];
+    const result = await response.json();
+    return result.data || [];
+  }, [lastFilters, pageSize]);
+
+  // Get available columns for search dropdown (all columns in table, so user can search any column)
+  const availableSearchColumns = Object.keys(selectedColumns);
 
   // Search is now handled by the DB — filteredData is the current page as-is
   const filteredData = data;
@@ -1020,12 +814,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[var(--background)]">
-      {/* Vertical Sidebar */}
-      <VerticalSidebar activeTab={activeTab} onTabChange={setActiveTab} />
-      
-      {/* Main Content - with left padding to account for sidebar */}
-      <div className="ml-14 transition-all duration-300">
-        <div className="container mx-auto px-4 py-6 max-w-[1920px]">
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-6 max-w-[1920px]">
           {/* Header */}
           <div className="mb-6">
           <div className="flex items-center justify-between flex-wrap mb-2">
@@ -1067,12 +857,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          
-        </div>
 
-        {/* Tab Content */}
-        {/* Data Management Tab */}
-        <div className={activeTab === 'data-management' ? '' : 'hidden'}>
         {/* Filter Section */}
         <div className="mb-6">
           <FilterSection 
@@ -1085,142 +870,8 @@ export default function Home() {
             onPhaseChange={(phaseId) => setSelectedPhaseId(phaseId)}
             onCampaignChange={(campaignId) => setSelectedCampaignId(campaignId)}
             onCampaignIdsChange={(campaignIds) => setSelectedCampaignIds(campaignIds)}
-            onCleanCD={handleCleanCD}
-            onClearTD={handleClearTD}
-            loadingCleanCD={loadingCleanCD}
-            loadingClearTD={loadingClearTD}
           />
         </div>
-
-        {/* Clean CD Confirmation Modal */}
-        {showCleanCDConfirm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-2xl p-6 max-w-md w-full mx-4">
-              <div className="flex items-center gap-3 mb-4">
-                <AlertTriangle className="w-6 h-6 text-yellow-500" />
-                <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Clean CD</h3>
-              </div>
-              <p className="text-[var(--secondary)] mb-6">
-                This will delete all disconnected records that have matching contact numbers with connected records in the selected campaigns. This action cannot be undone.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowCleanCDConfirm(false)}
-                  className="px-4 py-2 bg-[var(--card-bg)] text-[var(--foreground)] border border-[var(--card-border)] rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={executeCleanCD}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-md hover:from-purple-600 hover:to-purple-700 transition-all"
-                >
-                  Confirm
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Clear TD Confirmation Modal */}
-        {showClearTDConfirm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-2xl p-6 max-w-md w-full mx-4">
-              <div className="flex items-center gap-3 mb-4">
-                <AlertTriangle className="w-6 h-6 text-red-500" />
-                <h3 className="text-lg font-semibold text-[var(--foreground)]">Confirm Clear TD</h3>
-              </div>
-              <p className="text-[var(--secondary)] mb-6">
-                This will delete all records from the table that do NOT belong to campaigns associated with the selected client. This action cannot be undone.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowClearTDConfirm(false)}
-                  className="px-4 py-2 bg-[var(--card-bg)] text-[var(--foreground)] border border-[var(--card-border)] rounded-md hover:bg-[var(--table-row-hover)] transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={executeClearTD}
-                  className="px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-md hover:from-red-600 hover:to-red-700 transition-all"
-                >
-                  Confirm
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Clean CD Message Display */}
-        {cleanCDMessage && (
-          <div className={`mb-4 p-4 rounded-lg border ${
-            cleanCDTone === 'positive' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' :
-            cleanCDTone === 'neutral' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' :
-            'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-          } flex items-center justify-between`}>
-            <div className="flex items-center gap-3">
-              {cleanCDTone === 'positive' ? (
-                <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
-              ) : cleanCDTone === 'neutral' ? (
-                <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-              )}
-              <p className={`text-sm font-medium ${
-                cleanCDTone === 'positive' ? 'text-green-800 dark:text-green-300' :
-                cleanCDTone === 'neutral' ? 'text-blue-800 dark:text-blue-300' :
-                'text-red-800 dark:text-red-300'
-              }`}>
-                {cleanCDMessage}
-              </p>
-            </div>
-            <button
-              onClick={() => setCleanCDMessage(null)}
-              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${
-                cleanCDTone === 'positive' ? 'text-green-600 dark:text-green-400' :
-                cleanCDTone === 'neutral' ? 'text-blue-600 dark:text-blue-400' :
-                'text-red-600 dark:text-red-400'
-              }`}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Clear TD Message Display */}
-        {clearTDMessage && (
-          <div className={`mb-4 p-4 rounded-lg border ${
-            clearTDTone === 'positive' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' :
-            clearTDTone === 'neutral' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' :
-            'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-          } flex items-center justify-between`}>
-            <div className="flex items-center gap-3">
-              {clearTDTone === 'positive' ? (
-                <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
-              ) : clearTDTone === 'neutral' ? (
-                <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-              )}
-              <p className={`text-sm font-medium ${
-                clearTDTone === 'positive' ? 'text-green-800 dark:text-green-300' :
-                clearTDTone === 'neutral' ? 'text-blue-800 dark:text-blue-300' :
-                'text-red-800 dark:text-red-300'
-              }`}>
-                {clearTDMessage}
-              </p>
-            </div>
-            <button
-              onClick={() => setClearTDMessage(null)}
-              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${
-                clearTDTone === 'positive' ? 'text-green-600 dark:text-green-400' :
-                clearTDTone === 'neutral' ? 'text-blue-600 dark:text-blue-400' :
-                'text-red-600 dark:text-red-400'
-              }`}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
 
         {/* Column Selection & Export Section */}
         {data.length > 0 && (
@@ -1628,52 +1279,6 @@ export default function Home() {
             </div>
           </div>
 
-        {/* Campaign Management Tab */}
-        <div className={activeTab === 'campaign-management' ? '' : 'hidden'}>
-          <CampaignManagement selectedClientId={selectedClientId} />
-        </div>
-
-        {/* Campaign Automation Tab */}
-        <div className={activeTab === 'campaign-automation' ? '' : 'hidden'}>
-          <CampaignAutomation />
-        </div>
-
-        {/* Reports Tab */}
-        <div className={activeTab === 'reports' ? '' : 'hidden'}>
-          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-sm p-12">
-            <div className="text-center">
-              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-xl">
-                <FileStackIcon size={48} className="text-white" />
-              </div>
-              <h3 className="text-2xl font-bold text-[var(--foreground)] mb-3">
-                Advanced Reports
-              </h3>
-              <p className="text-[var(--secondary)] text-lg">
-                Comprehensive analytics and reporting dashboard. Coming soon!
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Monitor Tab */}
-        <div className={activeTab === 'monitor' ? '' : 'hidden'}>
-          <CampaignMonitor selectedClientId={selectedClientId} />
-        </div>
-
-        {/* Disposition Tree Tab */}
-        <div className={activeTab === 'disposition-tree' ? '' : 'hidden'}>
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">
-                Disposition Tree Visualization
-              </h2>
-              <p className="text-[var(--secondary)]">
-                Interactive visualization of call disposition outcomes. Node sizes represent relative counts.
-              </p>
-            </div>
-            <DispositionTree />
-          </div>
-        </div>
       </div>
 
       {/* Modals */}
@@ -1703,7 +1308,10 @@ export default function Home() {
           data={filteredData}
           selectedColumns={selectedColumns}
           csvFileName={csvFileName}
-            downloadFormat={downloadFormat}
+          downloadFormat={downloadFormat}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          fetchPreviewPage={fetchPreviewPage}
           onClose={() => setShowCSVPreview(false)}
           onConfirmDownload={performCSVDownload}
         />
@@ -2174,7 +1782,6 @@ export default function Home() {
           </div>
         </div>
       )}
-      </div>
     </div>
   );
 }
