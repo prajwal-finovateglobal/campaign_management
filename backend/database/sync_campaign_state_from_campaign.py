@@ -4,6 +4,10 @@ Sync cms_campaign_state from cms_campaign: set status and total_chunks from real
 - status: map cms_campaign.status (Millis: idle/started/finished) → state.status (idle/stopped/completed)
 - total_chunks: set from actual cms_chunks count (fixes 0 where campaign has chunks)
 
+Safeguard: status is NOT overwritten when state.status is 'running', 'paused', or 'scheduled'.
+Those indicate the backend auto-run loop is in control; overwriting from Millis would show Stopped
+while the loop is still running. total_chunks is always updated.
+
 Usage:
     cd backend && ./venv/bin/python database/sync_campaign_state_from_campaign.py
     cd backend && ./venv/bin/python database/sync_campaign_state_from_campaign.py --yes
@@ -56,6 +60,7 @@ def main():
     print_colored("This will update every row in cms_campaign_state:", Colors.YELLOW)
     print("  - status: from cms_campaign.status (finished→completed, started→stopped, else→idle)")
     print("  - total_chunks: from actual cms_chunks count")
+    print("  - Rows with status 'running', 'paused', or 'scheduled' keep their status (auto-run in control)")
     print()
 
     if not skip_confirmation:
@@ -89,14 +94,19 @@ def main():
             if state.total_chunks != chunk_count:
                 state.total_chunks = chunk_count
                 changed = True
-            if state.status != new_status:
+
+            # Do NOT overwrite status when auto-run loop is in control (running/paused/scheduled).
+            # Otherwise the script would set status to 'stopped' from Millis while the loop is still running.
+            auto_run_controlled = (state.status or '').strip().lower() in ('running', 'paused', 'scheduled')
+            if not auto_run_controlled and state.status != new_status:
                 state.status = new_status
                 changed = True
 
             if changed:
                 updated += 1
+                skip_note = " (status skipped: auto-run in control)" if auto_run_controlled else f" (from campaign.status={campaign.status!r})"
                 print_colored(
-                    f"  campaign_id={state.campaign_id}: status={state.status}, total_chunks={state.total_chunks} (from campaign.status={campaign.status!r})",
+                    f"  campaign_id={state.campaign_id}: status={state.status}, total_chunks={state.total_chunks}{skip_note}",
                     Colors.GREEN,
                 )
 

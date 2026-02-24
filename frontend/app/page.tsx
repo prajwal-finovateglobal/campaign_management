@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FilterSection } from '@/components/FilterSection';
 import { DataTable } from '@/components/DataTable';
@@ -298,9 +298,9 @@ export default function Home() {
         }
         
         setSelectedColumns(columns);
-        // Set first column as default search column
-        const firstColumn = availableColumns[0];
-        setSearchColumn(firstColumn);
+        // Keep user's search column if it still exists in the new data; otherwise default to first column
+        const firstColumn = availableColumns[0] || '';
+        setSearchColumn((prev) => (availableColumns.includes(prev) ? prev : firstColumn));
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -960,13 +960,30 @@ export default function Home() {
 
     const filename = csvFileName || 'campaign_data';
 
-    // Build request body (same filters + search as current view, all rows)
-    const requestBody = buildRequestBody(lastFilters, 1, 1);
-    delete requestBody.page;
-    delete requestBody.page_size;
-    requestBody.selected_columns = selectedCols;
-    requestBody.export_format = downloadFormat;
-    requestBody.filename = filename;
+    // Build export body from filters only — no pagination; backend returns full result set
+    const requestBody: Record<string, unknown> = {
+      ...lastFilters,
+      client_id: selectedClientId,
+      table_name: selectedClientTableName,
+      phase_id: selectedPhaseId,
+      selected_columns: selectedCols,
+      export_format: downloadFormat,
+      filename,
+    };
+    if (selectedCampaignIds && selectedCampaignIds.length > 0) {
+      requestBody.campaign_ids = selectedCampaignIds;
+    } else if (selectedCampaignId) {
+      requestBody.campaign_ids = [selectedCampaignId];
+    } else {
+      requestBody.campaign_ids = null;
+    }
+    if (searchColumn && searchInput.trim()) {
+      requestBody.search_column = searchColumn;
+      requestBody.search_value = searchInput.trim();
+    }
+    // Explicitly omit page/page_size so backend always does full export
+    delete (requestBody as any).page;
+    delete (requestBody as any).page_size;
 
     try {
       const response = await api.post('/export_data', requestBody);
@@ -995,8 +1012,18 @@ export default function Home() {
     setShowCSVPreview(false);
   };
 
-  // Get available columns for search dropdown (only selected columns)
-  const availableSearchColumns = Object.keys(selectedColumns).filter((key) => selectedColumns[key]);
+  /** Fetch a single page of data for the download preview modal (same filters as table, does not change table state) */
+  const fetchPreviewPage = useCallback(async (page: number): Promise<any[]> => {
+    if (!lastFilters) return [];
+    const requestBody = buildRequestBody(lastFilters, page, pageSize);
+    const response = await api.post('/show_data', requestBody);
+    if (!response.ok) return [];
+    const result = await response.json();
+    return result.data || [];
+  }, [lastFilters, pageSize]);
+
+  // Get available columns for search dropdown (all columns in table, so user can search any column)
+  const availableSearchColumns = Object.keys(selectedColumns);
 
   // Search is now handled by the DB — filteredData is the current page as-is
   const filteredData = data;
@@ -1703,7 +1730,10 @@ export default function Home() {
           data={filteredData}
           selectedColumns={selectedColumns}
           csvFileName={csvFileName}
-            downloadFormat={downloadFormat}
+          downloadFormat={downloadFormat}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          fetchPreviewPage={fetchPreviewPage}
           onClose={() => setShowCSVPreview(false)}
           onConfirmDownload={performCSVDownload}
         />

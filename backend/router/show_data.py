@@ -53,6 +53,10 @@ def show_data(request: ShowDataRequest, db: DB_DEPENDENCY)->ShowDataResponse:
     )
 
 
+# Export uses a large page size so we return all matching rows (no pagination)
+EXPORT_PAGE_SIZE = 10_000_000
+
+
 @router.post("/export_data")
 def export_data(request: ExportDataRequest, db: DB_DEPENDENCY):
     """
@@ -66,7 +70,7 @@ def export_data(request: ExportDataRequest, db: DB_DEPENDENCY):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="selected_columns cannot be empty")
 
-    # Build a ShowDataRequest with no pagination to get every matching row
+    # Build a ShowDataRequest with no pagination — always fetch full result set (ignore any client pagination)
     show_req = SDR(
         start_time=request.start_time,
         end_time=request.end_time,
@@ -84,7 +88,7 @@ def export_data(request: ExportDataRequest, db: DB_DEPENDENCY):
         search_column=request.search_column,
         search_value=request.search_value,
         page=1,
-        page_size=10_000_000,
+        page_size=EXPORT_PAGE_SIZE,
     )
 
     result_dicts, total_count = filter_data(db, show_req)

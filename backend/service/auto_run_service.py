@@ -131,11 +131,12 @@ async def _wait_for_time_window(campaign_id: int, db):
 
         if start_t <= cur_time < end_t:    # strict < end_t: window closes exactly at end_time
             state = repo.get_state(db, campaign_id)
-            if state and state.status == 'scheduled':
-                repo.set_status(db, campaign_id, 'running')
-                logger.info(f"[AUTO_RUN] Time window opened — campaign {campaign_id} resuming")
+            # Always set status to 'running' when window opens so cms_campaign_state is correct
+            repo.set_status(db, campaign_id, 'running')
+            logger.info(f"[AUTO_RUN] Time window opened — campaign {campaign_id} resuming")
 
-                # 🌅 Notify: window opened, loop resuming
+            if state and state.status == 'scheduled':
+                # 🌅 Notify: window opened, loop resuming (only when we were waiting as scheduled)
                 try:
                     from models.client import Campaign
                     campaign         = db.query(Campaign).filter(Campaign.id == campaign_id).first()
@@ -473,6 +474,9 @@ async def _run_loop(
 
                 # Enforce daily time window BEFORE each chunk (pauses here if outside window)
                 await _wait_for_time_window(campaign_id, db)
+
+                # Re-assert status = 'running' so DB stays correct even if another worker (e.g. Monitor poll) overwrote it to 'stopped'
+                repo.set_status(db, campaign_id, 'running')
 
                 # Credit health check — alert if 0 connected calls in recent records
                 if i % 2 != 0:
